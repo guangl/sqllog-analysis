@@ -1,0 +1,9 @@
+# 配置要检查的规则
+# 参考：https://rust-lang.github.io/rust-clippy/master/
+warn_on_all = true
+
+[lints]
+# 将一些警告提升为错误
+unused = "deny"
+unused_imports = "deny"
+dead_code = "warn"      # 保持为警告级别，因为有些代码可能是为将来准备的
