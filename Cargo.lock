@@ -342,6 +342,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65193589c6404eb80b450d618eaf9a2cafaaafd57ecce47370519ef674a7bd44"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex",
 ]
 
@@ -806,6 +808,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
+name = "jobserver"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
+dependencies = [
+ "getrandom 0.3.3",
+ "libc",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -897,6 +909,7 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2d70696fa43ca9ed04ab7d8bfd4f3f1df73cabd3c872d67ddc9f55bb8dd4d1a"
 dependencies = [
+ "cc",
  "flate2",
  "pkg-config",
  "serde",
@@ -1391,6 +1404,7 @@ dependencies = [
  "duckdb",
  "lazy_static",
  "regex",
+ "tempfile",
 ]
 
 [[package]]
