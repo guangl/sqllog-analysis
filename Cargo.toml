@@ -16,6 +16,11 @@ tempfile = "3.8"
 memchr = "2.6"
 thiserror = "1.0"
 
+log = "0.4"
+env_logger = "0.10"
+flexi_logger = "0.27"
+chrono = "0.4"
+
 [dev-dependencies]
 criterion = "0.5"
 regex = "1.10"

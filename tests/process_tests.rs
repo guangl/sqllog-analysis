@@ -6,7 +6,7 @@ use tempfile::tempdir;
 #[test]
 fn test_process_sqllog_dir_empty() {
     let dir = tempdir().unwrap();
-    let (total_files, total_logs, error_files) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 0);
     assert_eq!(total_logs, 0);
     assert!(error_files.is_empty());
@@ -18,7 +18,7 @@ fn test_process_sqllog_dir_with_error_file() {
     let file_path = dir.path().join("dmsql_test.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "bad line").unwrap();
-    let (total_files, total_logs, error_files) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 1);
     assert_eq!(total_logs, 0);
     assert!(!error_files.is_empty());
@@ -31,7 +31,7 @@ fn test_process_sqllog_dir_non_utf8_file() {
     let file_path = dir.path().join("dmsql_nonutf8.log");
     let mut file = File::create(&file_path).unwrap();
     file.write_all(&[0xff, 0xfe, 0xfd]).unwrap();
-    let (total_files, total_logs, error_files) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 1);
     assert_eq!(total_logs, 0);
     assert!(!error_files.is_empty());
@@ -44,7 +44,7 @@ fn test_process_sqllog_dir_no_dmsql_files() {
     let file_path = dir.path().join("other.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "test").unwrap();
-    let (total_files, total_logs, error_files) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 0);
     assert_eq!(total_logs, 0);
     assert!(error_files.is_empty());
@@ -132,7 +132,7 @@ fn test_process_sqllog_dir_mixed_files() {
     let mut f_other = File::create(&file_other).unwrap();
     writeln!(f_other, "just for test").unwrap();
     // 执行综合处理
-    let (total_files, total_logs, error_files) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
     // 只统计 dmsql*.log 文件
     assert_eq!(total_files, 4);
     // 合法日志能被解析

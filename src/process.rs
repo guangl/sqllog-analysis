@@ -1,6 +1,7 @@
 #![allow(clippy::type_complexity)]
 use crate::sqllog::Sqllog;
 use anyhow::Result;
+use log::{info, trace};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -21,11 +22,14 @@ use std::path::Path;
 /// - 每个文件调用 Sqllog::from_file_with_errors 进行分段解析
 /// - 所有解析错误（格式/UTF8/IO等）均收集到 error_files
 /// - 解析进度和耗时通过 println 输出
-pub fn process_sqllog_dir<P: AsRef<Path>>(dir: P) -> Result<(usize, usize, Vec<(String, String)>)> {
+pub fn process_sqllog_dir<P: AsRef<Path>>(
+    dir: P,
+) -> Result<(usize, usize, Vec<(String, String)>, std::time::Duration)> {
     let mut total_files = 0;
     let mut total_logs = 0;
     let mut error_files = Vec::new();
     use std::time::Instant;
+    let global_start = Instant::now();
     // 遍历目录下所有文件
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
@@ -38,12 +42,12 @@ pub fn process_sqllog_dir<P: AsRef<Path>>(dir: P) -> Result<(usize, usize, Vec<(
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             if name.starts_with("dmsql") && name.ends_with(".log") {
                 total_files += 1;
-                println!("\n开始解析文件: {name}");
+                trace!("开始解析文件: {name}");
                 let start = Instant::now();
                 // 分段解析日志文件，收集所有错误
                 let (logs, errors) = Sqllog::from_file_with_errors(&path);
                 let elapsed = start.elapsed();
-                println!("文件 {name} 解析耗时: {elapsed:.2?}");
+                trace!("文件 {name} 解析耗时: {elapsed:.2?}");
                 total_logs += logs.len();
                 // 错误格式化为 (文件名, 错误详情)
                 for (line, content, err) in errors {
@@ -55,7 +59,8 @@ pub fn process_sqllog_dir<P: AsRef<Path>>(dir: P) -> Result<(usize, usize, Vec<(
             }
         }
     }
-    Ok((total_files, total_logs, error_files))
+    let global_elapsed = global_start.elapsed();
+    Ok((total_files, total_logs, error_files, global_elapsed))
 }
 
 /// 将所有解析失败的文件及错误详情写入 error_files.txt。
@@ -72,7 +77,7 @@ pub fn write_error_files(error_files: &[(String, String)]) -> Result<()> {
     if error_files.is_empty() {
         return Ok(());
     }
-    println!("\n以下文件解析失败，已写入 error_files.txt:");
+    info!("以下文件解析失败，已写入 error_files.txt:");
     // 覆盖写入 error_files.txt
     let mut file = OpenOptions::new()
         .create(true)
@@ -81,7 +86,7 @@ pub fn write_error_files(error_files: &[(String, String)]) -> Result<()> {
         .open("error_files.txt")?;
     for (fname, content) in error_files {
         writeln!(file, "{fname}: {content}")?;
-        println!("  {fname}: {content}");
+        info!("  {fname}: {content}");
     }
     Ok(())
 }
