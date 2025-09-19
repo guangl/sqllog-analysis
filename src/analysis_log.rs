@@ -1,9 +1,11 @@
 //! 日志功能模块
 //!
-//! 提供统一的日志初始化与参数解析接口。
+//! 提供统一的日志初始化与参数解析接口（使用 `tracing` / `tracing-subscriber`），
+//! 支持同时输出到终端和文件（按天命名），并尽量在初始化失败时给出友好的错误提示。
 
 use chrono::Local;
-use log::{LevelFilter, info};
+use log::LevelFilter;
+use tracing::info;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 use tracing_appender::non_blocking;
@@ -60,7 +62,13 @@ impl LogConfig {
         // 默认：如果没有传入 --log-file，则使用当前工作目录下的 `logs` 目录
         let dir = self.log_file.as_ref().map_or_else(
             || {
-                let mut p = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                let mut p = match std::env::current_dir() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("无法获取当前工作目录，使用 '.' 作为基准: {e}");
+                        PathBuf::from(".")
+                    }
+                };
                 p.push("logs");
                 // 如果目录不存在，尝试创建
                 if let Err(e) = std::fs::create_dir_all(&p) {
@@ -78,15 +86,18 @@ impl LogConfig {
         let file_path = dir.join(filename);
 
         // 打开（创建并追加）文件
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&file_path)
-            .expect("无法创建日志文件");
+        let file = match OpenOptions::new().create(true).append(true).open(&file_path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("无法创建日志文件 {}: {e}", file_path.display());
+                return;
+            }
+        };
 
         let (non_blocking, guard) = non_blocking::NonBlocking::new(file);
-        // 保持 guard 防止退出时丢失日志
-        std::mem::forget(guard);
+        // 将 guard 泄漏为静态引用以保证其在程序生命周期内存活，从而
+        // 可以安全地使用 non_blocking writer（简洁且比 std::mem::forget 更明确）。
+        let _guard_ref: &'static _ = Box::leak(Box::new(guard));
 
         // 创建两个输出层：stdout 层与文件层，注册到全局 subscriber
         let stdout_layer = fmt::layer()
