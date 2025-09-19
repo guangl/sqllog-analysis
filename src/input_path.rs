@@ -11,7 +11,7 @@ pub fn get_sqllog_dir() -> PathBuf {
     }
     // 交互输入
     let input: String = Input::new()
-        .with_prompt("请输入 sqllog 文件夹路径")
+        .with_prompt("请输入 sqllog 文件夹路径（会查询目录下面的 dmsql*.log 文件来解析）：")
         .interact_text()
         .unwrap();
     PathBuf::from(input.trim())
