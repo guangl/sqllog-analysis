@@ -313,8 +313,12 @@ fn test_appname_ip_edge_cases() {
     let line_ipv6 = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2 appname:TestApp ip:::1:2:3:4:5:6:7:8) test";
     let log = Sqllog::from_line(line_ipv6, 1).unwrap().unwrap();
     // 兼容实际解析结果，appname 可能为 None 或包含 TestApp
-    if let Some(val) = &log.appname { assert!(val.starts_with("TestApp")) }
-    if let Some(val) = &log.ip { assert!(val.contains(":")) }
+    if let Some(val) = &log.appname {
+        assert!(val.starts_with("TestApp"))
+    }
+    if let Some(val) = &log.ip {
+        assert!(val.contains(":"))
+    }
     let line_appname_space = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2 appname:  ip:::ffff:127.0.0.1) test";
     let log = Sqllog::from_line(line_appname_space, 1).unwrap().unwrap();
     assert!(matches!(log.appname, Some(ref s) if s.trim().is_empty()));
@@ -560,4 +564,106 @@ fn test_print_progress_extreme_values() {
     Sqllog::print_progress(0, 100, &mut last_percent); // current=0
     Sqllog::print_progress(100, 100, &mut last_percent); // current=total
     Sqllog::print_progress(50, 100, &mut last_percent); // 正常值
+}
+
+#[test]
+fn test_is_first_row_valid_and_invalid() {
+    // 有效首行
+    let s = "2025-09-20 12:34:56.789";
+    assert!(is_first_row(s));
+
+    // 长度不对
+    let s2 = "2025-09-20 12:34:56";
+    assert!(!is_first_row(s2));
+
+    // 非数字位置
+    let s3 = "2025-09-20 XX:34:56.789";
+    assert!(!is_first_row(s3));
+}
+
+#[test]
+fn test_from_line_parses_full_segment() {
+    let segment = "2025-09-20 12:34:56.789 (EP[123] sess:0x1a2b thrd:123 user:john trxid:456 stmt:0xabc appname:myapp ip:127.0.0.1) [INS]: EXECTIME: 100(ms) ROWCOUNT: 3 EXEC_ID: 42.";
+
+    let res = Sqllog::from_line(segment, 1).expect("from_line should not error");
+    assert!(res.is_some());
+    let log = res.unwrap();
+
+    assert_eq!(log.ep, 123);
+    assert_eq!(log.user.as_deref(), Some("john"));
+    assert_eq!(log.appname.as_deref(), Some("myapp"));
+    assert_eq!(log.ip.as_deref(), Some("127.0.0.1"));
+    assert_eq!(log.sql_type.as_deref(), Some("INS"));
+    assert_eq!(log.execute_time, Some(100));
+    assert_eq!(log.rowcount, Some(3));
+    assert_eq!(log.execute_id, Some(42));
+}
+
+#[test]
+fn test_from_file_with_leading_whitespace() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("leading_ws.log");
+    let mut file = File::create(&file_path).unwrap();
+    // 行前包含空格与制表符，应被 trim 掉并正确解析为首行
+    writeln!(
+        file,
+        "   2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) first"
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "\t2025-10-10 10:10:11.200 (EP[1] sess:0x2 thrd:2 user:V trxid:2 stmt:0x3) second"
+    )
+    .unwrap();
+    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    assert_eq!(logs.len(), 2);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn test_from_file_consecutive_segments() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("consecutive.log");
+    let mut file = File::create(&file_path).unwrap();
+    // 两个首行之间没有空行，parser 应能把它们识别为独立段
+    writeln!(
+        file,
+        "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) first"
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "2025-10-10 10:10:11.100 (EP[2] sess:0x2 thrd:2 user:V trxid:2 stmt:0x3) second"
+    )
+    .unwrap();
+    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    assert_eq!(logs.len(), 2);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn test_from_file_with_invalid_utf8_in_middle() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("invalid_middle.log");
+    let mut file = File::create(&file_path).unwrap();
+    writeln!(
+        file,
+        "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) valid"
+    )
+    .unwrap();
+    // 写入一段非法 UTF8（会被记录为错误），随后再写一条有效记录
+    file.write_all(&[0xff, 0xfe, 0xfd]).unwrap();
+    writeln!(
+        file,
+        "2025-10-10 10:10:12.100 (EP[3] sess:0x3 thrd:3 user:W trxid:3 stmt:0x4) after"
+    )
+    .unwrap();
+    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    // 应当成功解析两条有效日志，并记录至少一个 UTF8 错误
+    assert_eq!(logs.len(), 2);
+    assert!(
+        errors
+            .iter()
+            .any(|(_, _, e)| format!("{e}").to_lowercase().contains("utf"))
+    );
 }

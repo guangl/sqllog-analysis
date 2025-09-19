@@ -373,17 +373,16 @@ impl Sqllog {
 
             Self::print_progress(offset, total, &mut last_percent);
 
-            if Self::handle_raw_line_impl(
+            // handle_raw_line_impl 会记录 UTF-8 / 解析相关错误到 `errors`，
+            // 这里直接调用并忽略返回值（已改为无返回值）。
+            Self::handle_raw_line_impl(
                 line_trimmed,
                 &mut line_num,
                 &mut has_first_row,
                 &mut segment_buf,
                 &mut sqllogs,
                 &mut errors,
-            ) == Err(())
-            {
-                // handle_raw_line_impl 已在 errors 中记录，继续循环
-            }
+            );
         }
 
         Self::finalize_segments(
@@ -406,14 +405,17 @@ impl Sqllog {
         mut errors: Vec<(usize, String, SqllogError)>,
     ) -> (Vec<Self>, Vec<(usize, String, SqllogError)>) {
         if !has_first_row {
-            return (
-                Vec::new(),
-                vec![(
-                    0,
-                    "无有效日志行".to_string(),
-                    SqllogError::Other("无有效日志行".to_string()),
-                )],
-            );
+            if errors.is_empty() {
+                return (
+                    Vec::new(),
+                    vec![(
+                        0,
+                        "无有效日志行".to_string(),
+                        SqllogError::Other("无有效日志行".to_string()),
+                    )],
+                );
+            }
+            return (Vec::new(), errors);
         }
 
         // 文件结尾最后一段
@@ -442,16 +444,38 @@ impl Sqllog {
         (line_trimmed, next)
     }
 
-    fn line_bytes_to_str_impl<'a>(
-        line_bytes: &'a [u8],
+    // Convert a raw line byte slice to a String. On UTF-8 errors we record the
+    // error but return a lossy-decoded String so parsing can continue. If the
+    // decoded string contains leading invalid/replacement characters before a
+    // valid timestamp, try to resynchronize by locating the first timestamp
+    // and trimming the prefix so the parser can detect a new segment.
+    fn line_bytes_to_str_impl(
+        line_bytes: &[u8],
         line_num: usize,
         errors: &mut Vec<(usize, String, SqllogError)>,
-    ) -> Option<&'a str> {
+    ) -> String {
         match std::str::from_utf8(line_bytes) {
-            Ok(s) => Some(s),
+            Ok(s) => s.to_string(),
             Err(e) => {
                 errors.push((line_num, format!("{line_bytes:?}"), SqllogError::Utf8(e)));
-                None
+                let mut s = String::from_utf8_lossy(line_bytes).to_string();
+                // Trim leading spaces/tabs and replacement characters which may
+                // come from invalid utf-8 sequences.
+                s = s
+                    .trim_start_matches(&[' ', '\t', '\u{FFFD}'][..])
+                    .to_string();
+
+                // If the trimmed prefix still doesn't start with a timestamp,
+                // try to find the first position that does.
+                if s.len() >= 23 && !is_first_row(&s[0..23]) {
+                    if let Some(pos) =
+                        (0..=s.len().saturating_sub(23)).find(|&i| is_first_row(&s[i..i + 23]))
+                    {
+                        s = s[pos..].to_string();
+                    }
+                }
+
+                s
             }
         }
     }
@@ -463,21 +487,20 @@ impl Sqllog {
         segment_buf: &mut String,
         sqllogs: &mut Vec<Self>,
         errors: &mut Vec<(usize, String, SqllogError)>,
-    ) -> Result<(), ()> {
-        let Some(line_str) = Self::line_bytes_to_str_impl(line_bytes, *line_num, errors) else {
-            *has_first_row = true;
-            return Err(());
-        };
+    ) {
+        // Always get a String (lossy on invalid UTF-8). UTF-8 errors are
+        // recorded inside line_bytes_to_str_impl but are not fatal; we attempt
+        // to continue parsing following lines.
+        let line_str = Self::line_bytes_to_str_impl(line_bytes, *line_num, errors);
 
         Self::process_line(
-            line_str,
+            &line_str,
             has_first_row,
             segment_buf,
             line_num,
             sqllogs,
             errors,
         );
-        Ok(())
     }
 
     /// 进度打印辅助函数
