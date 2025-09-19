@@ -1,9 +1,9 @@
-use anyhow::Result;
-use sqllog_analysis::input_path::get_sqllog_dir;
-use sqllog_analysis::process::{process_sqllog_dir, write_error_files};
 mod analysis_log;
 use analysis_log::LogConfig;
+use anyhow::Result;
 use log::{error, info, trace};
+use sqllog_analysis::input_path::get_sqllog_dir;
+use sqllog_analysis::process::{process_sqllog_dir, write_error_files};
 
 fn main() -> Result<()> {
     // 日志参数解析与初始化

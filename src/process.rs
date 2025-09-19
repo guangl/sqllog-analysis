@@ -77,9 +77,7 @@ pub fn write_error_files(error_files: &[(String, String)]) -> Result<()> {
     if error_files.is_empty() {
         return Ok(());
     }
-    if !error_files.is_empty() {
-        info!("以下文件解析失败，已写入 error_files.txt:");
-    }
+    info!("以下文件解析失败，已写入 error_files.txt:");
     // 覆盖写入 error_files.txt
     let mut file = OpenOptions::new()
         .create(true)
