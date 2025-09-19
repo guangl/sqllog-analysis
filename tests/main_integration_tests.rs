@@ -21,7 +21,7 @@ fn test_main_with_error_files() {
     let file_path = dir.path().join("dmsql_test.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "bad line").unwrap();
-    let (total_files, total_logs, error_files) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 1);
     assert_eq!(total_logs, 0);
     assert!(!error_files.is_empty());

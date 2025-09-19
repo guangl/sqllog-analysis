@@ -2,3 +2,4 @@
 sqllog/*
 report/*
 error_files.txt
+logs/*

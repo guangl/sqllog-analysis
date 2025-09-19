@@ -1,4 +1,5 @@
 use lazy_static::lazy_static; // 用于静态正则表达式
+use log::{error, info, trace};
 use memchr::memchr; // 高效查找字节分隔符
 use regex::Regex; // 正则表达式解析日志
 use std::path::Path; // 文件路径处理
@@ -93,6 +94,7 @@ impl Sqllog {
 
         // 只对完整段做正则匹配
         if let Some(caps) = SQLLOG_RE.captures(segment) {
+            trace!("行{} 匹配到 SQLLOG 正则，开始解析字段", line_num);
             let occurrence_time =
                 caps.get(1)
                     .map(|m| m.as_str().to_string())
@@ -239,6 +241,7 @@ impl Sqllog {
                     (None, None, None)
                 };
 
+            trace!("行{} 字段解析成功", line_num);
             Ok(Some(Sqllog {
                 occurrence_time,
                 ep,
@@ -256,6 +259,7 @@ impl Sqllog {
                 execute_id,
             }))
         } else {
+            trace!("行{} 未匹配到 SQLLOG 正则，内容: {}", line_num, segment);
             Err(SqllogError::Format {
                 line: line_num,
                 content: segment.to_string(),
@@ -277,6 +281,7 @@ impl Sqllog {
         let data = match std::fs::read(path.as_ref()) {
             Ok(d) => d,
             Err(e) => {
+                error!("文件读取失败: {:?}, 错误: {}", path.as_ref(), e);
                 return (
                     Vec::new(),
                     vec![(0, format!("IO错误: {e}"), SqllogError::Io(e))],
@@ -288,7 +293,7 @@ impl Sqllog {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
-        println!("开始处理文件: {file_name}");
+        trace!("开始处理文件: {file_name}");
         let total = data.len();
         if total == 0 {
             return (Vec::new(), Vec::new());
@@ -391,8 +396,8 @@ impl Sqllog {
             }
         }
 
-        println!(
-            "\n文件 {} 处理完成，共解析 {} 条记录，{} 条错误",
+        info!(
+            "文件 {} 处理完成，共解析 {} 条记录，{} 条错误",
             file_name,
             sqllogs.len(),
             errors.len()
