@@ -1,7 +1,6 @@
 use sqllog_analysis::process::{process_sqllog_dir, write_error_files};
-use std::fs::{self, File, OpenOptions};
+use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[test]
