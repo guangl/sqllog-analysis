@@ -2,9 +2,9 @@ name: Rust Tests
 
 on:
   push:
-    branches: ["main", "master"] # 在推送到主分支时触发
+    branches: ["main"] # 在推送到主分支时触发
   pull_request:
-    branches: ["main", "master"] # 在创建针对主分支的PR时触发
+    branches: ["main"] # 在创建针对主分支的PR时触发
 
 env:
   CARGO_TERM_COLOR: always
