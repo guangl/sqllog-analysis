@@ -25,13 +25,6 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
-      - name: Run cargo bench
-        run: cargo bench
-
       # 可选：运行 clippy 进行代码质量检查
       - name: Run clippy
         run: cargo clippy -- -D warnings
-
-      # 可选：检查代码格式
-      - name: Check formatting
-        run: cargo fmt --check

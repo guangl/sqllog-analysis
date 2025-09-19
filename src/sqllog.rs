@@ -1,4 +1,3 @@
-// 引入常用库和依赖
 use lazy_static::lazy_static; // 用于静态正则表达式
 use memchr::memchr; // 高效查找字节分隔符
 use regex::Regex; // 正则表达式解析日志
@@ -40,6 +39,7 @@ pub enum SqllogError {
 const DAYS_IN_MONTH: [u8; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /// 单条 SQL 日志结构体，包含所有解析字段
+#[derive(Default, Debug)]
 pub struct Sqllog {
     /// 日志发生时间
     pub occurrence_time: String,
@@ -71,43 +71,7 @@ pub struct Sqllog {
     pub execute_id: Option<u64>,
 }
 
-#[allow(clippy::too_many_arguments)]
 impl Sqllog {
-    /// 构造函数，组装所有字段
-    pub fn new(
-        occurrence_time: String,
-        ep: i32,
-        session: Option<String>,
-        thread: Option<String>,
-        user: Option<String>,
-        trx_id: Option<String>,
-        statement: Option<String>,
-        appname: Option<String>,
-        ip: Option<String>,
-        sql_type: Option<String>,
-        description: String,
-        execute_time: Option<u64>,
-        rowcount: Option<u64>,
-        execute_id: Option<u64>,
-    ) -> Self {
-        Self {
-            occurrence_time,
-            ep,
-            session,
-            thread,
-            user,
-            trx_id,
-            statement,
-            appname,
-            ip,
-            sql_type,
-            description,
-            execute_time,
-            rowcount,
-            execute_id,
-        }
-    }
-
     /// 从单段日志文本解析出 Sqllog 结构体
     ///
     /// # 参数
@@ -121,11 +85,9 @@ impl Sqllog {
     pub fn from_line(segment: &str, line_num: usize) -> SResult<Option<Self>> {
         // 静态正则表达式，提升性能
         lazy_static! {
-            static ref SQLLOG_RE: Regex = Regex::new(
-                r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \(EP\[(\d+)\] sess:(NULL|0x[0-9a-f]+) thrd:(-1|NULL|\d+) user:(NULL|\w+) trxid:(NULL|\d+) stmt:(NULL|0x[0-9a-f]+)(?:\sappname:(.*?))?(?:\sip(?::(?:::ffff:)?([0-9]{1,3}(?:\.[0-9]{1,3}){3}))?)?\)\s(?:\[(INS|DEL|ORA|UPD|SEL)\]:?\s)?(.*)"
+            static ref SQLLOG_RE: Regex = Regex::new(r"(?s)(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \(EP\[(\d+)\] sess:(NULL|0x[0-9a-f]+) thrd:(-1|NULL|\d+) user:(NULL|\w+) trxid:(NULL|\d+) stmt:(NULL|0x[0-9a-f]+)(?:\sappname:(.*?))?(?:\sip(?::(?:::ffff:)?([0-9]{1,3}(?:\.[0-9]{1,3}){3}))?)?\)\s(?:\[(INS|DEL|ORA|UPD|SEL)\]:?\s)?((?:.|\n)*)"
             ).unwrap();
-            static ref DESC_RE: Regex = Regex::new(
-                r"EXECTIME:\s*(\d+)\(ms\)\s*ROWCOUNT:\s*(\d+)\s*EXEC_ID:\s*(\d+)\."
+            static ref DESC_RE: Regex = Regex::new(r"EXECTIME:\s*(\d+)\(ms\)\s*ROWCOUNT:\s*(\d+)\s*EXEC_ID:\s*(\d+)."
             ).unwrap();
         }
 
@@ -277,7 +239,7 @@ impl Sqllog {
                     (None, None, None)
                 };
 
-            Ok(Some(Self::new(
+            Ok(Some(Sqllog {
                 occurrence_time,
                 ep,
                 session,
@@ -292,46 +254,13 @@ impl Sqllog {
                 execute_time,
                 rowcount,
                 execute_id,
-            )))
+            }))
         } else {
             Err(SqllogError::Format {
                 line: line_num,
                 content: segment.to_string(),
             })
         }
-    }
-
-    /// 进度打印辅助函数
-    ///
-    /// # 参数
-    /// * `current` - 当前处理字节数
-    /// * `total` - 文件总字节数
-    /// * `last_percent` - 上次打印的进度百分比
-    fn print_progress(current: usize, total: usize, last_percent: &mut u8) {
-        let percent = ((current as f64 / total as f64) * 100.0) as u8;
-        if percent >= *last_percent + 5 {
-            print!("\r处理进度: {percent}% ");
-            std::io::Write::flush(&mut std::io::stdout()).ok();
-            *last_percent = percent;
-        }
-    }
-
-    /// 段落处理辅助函数
-    ///
-    /// # 参数
-    /// * `buf` - 当前段落缓冲区
-    /// * `line_num` - 当前段落行号
-    /// * `sqllogs` - 结果累加 Vec
-    fn handle_segment(buf: &mut String, line_num: usize, sqllogs: &mut Vec<Sqllog>) -> SResult<()> {
-        if !buf.is_empty() {
-            match Sqllog::from_line(buf, line_num) {
-                Ok(Some(log)) => sqllogs.push(log),
-                Ok(None) => {}
-                Err(e) => return Err(e),
-            }
-            buf.clear();
-        }
-        Ok(())
     }
 
     /// 从文件批量解析 SQL 日志，自动分段
@@ -342,8 +271,18 @@ impl Sqllog {
     /// # 返回
     /// * Ok(Vec<Sqllog>) - 解析成功
     /// * Err(SqllogError) - 解析失败
-    pub fn from_file<P: AsRef<Path>>(path: P) -> SResult<Vec<Self>> {
-        let data = std::fs::read(path.as_ref())?;
+    pub fn from_file_with_errors<P: AsRef<Path>>(
+        path: P,
+    ) -> (Vec<Self>, Vec<(usize, String, SqllogError)>) {
+        let data = match std::fs::read(path.as_ref()) {
+            Ok(d) => d,
+            Err(e) => {
+                return (
+                    Vec::new(),
+                    vec![(0, format!("IO错误: {e}"), SqllogError::Io(e))],
+                );
+            }
+        };
         let file_name = path
             .as_ref()
             .file_name()
@@ -352,12 +291,12 @@ impl Sqllog {
         println!("开始处理文件: {file_name}");
         let total = data.len();
         if total == 0 {
-            // 空文件直接返回 Ok(Vec::new)
-            return Ok(Vec::new());
+            return (Vec::new(), Vec::new());
         }
 
         let mut last_percent = 0u8;
         let mut sqllogs = Vec::with_capacity(1_000_000);
+        let mut errors = Vec::new();
         let mut has_first_row = false;
         let mut offset = 0;
         let mut segment_buf = String::new();
@@ -371,7 +310,6 @@ impl Sqllog {
             let line = &data[offset..end];
             offset = end + 1;
 
-            // 去除行首空白
             let line_trimmed = match line.iter().position(|&b| b != b' ' && b != b'\t') {
                 Some(pos) => &line[pos..],
                 None => line,
@@ -381,24 +319,42 @@ impl Sqllog {
 
             let line_str = match std::str::from_utf8(line_trimmed) {
                 Ok(s) => s,
-                Err(e) => return Err(SqllogError::Utf8(e)),
+                Err(e) => {
+                    errors.push((line_num, format!("{line_trimmed:?}"), SqllogError::Utf8(e)));
+                    has_first_row = true; // 只要有任何行被处理，避免被覆盖为 Other
+                    continue;
+                }
             };
 
-            // 只统计原始行的 is_first_row
-            if let Some(prefix) = line_str.get(0..23) {
-                if is_first_row(prefix) {
-                    has_first_row = true;
+            let is_new_segment = if let Some(prefix) = line_str.get(0..23) {
+                is_first_row(prefix)
+            } else {
+                false
+            };
+
+            if is_new_segment {
+                has_first_row = true;
+                if !segment_buf.is_empty() {
+                    match Sqllog::from_line(&segment_buf, line_num) {
+                        Ok(Some(log)) => sqllogs.push(log),
+                        Ok(None) => {
+                            errors.push((
+                                line_num,
+                                segment_buf.clone(),
+                                SqllogError::Format {
+                                    line: line_num,
+                                    content: segment_buf.clone(),
+                                },
+                            ));
+                        }
+                        Err(e) => errors.push((line_num, segment_buf.clone(), e)),
+                    }
+                    segment_buf.clear();
                 }
+                line_num = 1;
             }
 
-            // 新段落开始，处理上一段
-            if let Some(prefix) = line_str.get(0..23) {
-                if is_first_row(prefix) {
-                    Sqllog::handle_segment(&mut segment_buf, line_num, &mut sqllogs)?;
-                    line_num = 1;
-                }
-            }
-
+            // 无论是否新 segment，都合并当前行到 segment_buf
             if !segment_buf.is_empty() {
                 segment_buf.push('\n');
             }
@@ -407,39 +363,56 @@ impl Sqllog {
         }
 
         if !has_first_row {
-            return Err(SqllogError::Other("无有效日志行".to_string()));
+            return (
+                Vec::new(),
+                vec![(
+                    0,
+                    "无有效日志行".to_string(),
+                    SqllogError::Other("无有效日志行".to_string()),
+                )],
+            );
         }
 
         // 文件结尾最后一段
-        Sqllog::handle_segment(&mut segment_buf, line_num, &mut sqllogs)?;
+        if !segment_buf.is_empty() {
+            match Sqllog::from_line(&segment_buf, line_num) {
+                Ok(Some(log)) => sqllogs.push(log),
+                Ok(None) => {
+                    errors.push((
+                        line_num,
+                        segment_buf.clone(),
+                        SqllogError::Format {
+                            line: line_num,
+                            content: segment_buf.clone(),
+                        },
+                    ));
+                }
+                Err(e) => errors.push((line_num, segment_buf.clone(), e)),
+            }
+        }
 
         println!(
-            "\n文件 {} 处理完成，共解析 {} 条记录",
+            "\n文件 {} 处理完成，共解析 {} 条记录，{} 条错误",
             file_name,
-            sqllogs.len()
+            sqllogs.len(),
+            errors.len()
         );
-        Ok(sqllogs)
+        (sqllogs, errors)
     }
 
-    /// 以人类可读格式打印单条日志内容
-    pub fn display(&self) {
-        println!(
-            "Occurrence Time: {}, EP: {}, Session: {:?}, Thread: {:?}, User: {:?}, Trx ID: {:?}, Statement: {:?}, Appname: {:?}, IP: {:?}, SQL Type: {:?}, Description: {}, Execute Time: {:?}, Rowcount: {:?}, Execute ID: {:?}",
-            self.occurrence_time,
-            self.ep,
-            self.session,
-            self.thread,
-            self.user,
-            self.trx_id,
-            self.statement,
-            self.appname,
-            self.ip,
-            self.sql_type,
-            self.description,
-            self.execute_time,
-            self.rowcount,
-            self.execute_id
-        );
+    /// 进度打印辅助函数
+    ///
+    /// # 参数
+    /// * `current` - 当前处理字节数
+    /// * `total` - 文件总字节数
+    /// * `last_percent` - 上次打印的进度百分比
+    pub fn print_progress(current: usize, total: usize, last_percent: &mut u8) {
+        let percent = ((current as f64 / total as f64) * 100.0) as u8;
+        if percent >= *last_percent + 5 {
+            print!("\r处理进度: {percent}% ");
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+            *last_percent = percent;
+        }
     }
 }
 

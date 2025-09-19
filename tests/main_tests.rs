@@ -59,14 +59,13 @@ fn test_main_parse_success_and_error() {
             if path.is_file() {
                 if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
                     if filename.starts_with("dmsql") && filename.ends_with(".log") {
-                        match Sqllog::from_file(&path) {
-                            Ok(sqllog) => {
-                                println!("成功解析文件: {}，共 {} 条记录", filename, sqllog.len());
-                            }
-                            Err(e) => {
-                                println!("解析文件 {} 时出错: {}", filename, e);
-                            }
-                        }
+                        let (logs, errors) = Sqllog::from_file_with_errors(&path);
+                        println!(
+                            "成功解析文件: {}，共 {} 条记录，{} 条错误",
+                            filename,
+                            logs.len(),
+                            errors.len()
+                        );
                     }
                 }
             }

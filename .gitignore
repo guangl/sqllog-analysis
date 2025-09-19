@@ -1,2 +1,4 @@
 /target
 sqllog/*
+report/*
+error_files.txt
