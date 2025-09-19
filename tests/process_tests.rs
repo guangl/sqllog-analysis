@@ -104,3 +104,60 @@ fn test_write_error_files_io_error() {
     // 切回原目录
     std::env::set_current_dir(old_dir).unwrap();
 }
+
+#[test]
+fn test_process_sqllog_dir_mixed_files() {
+    let dir = tempdir().unwrap();
+    // 合法日志
+    let file_valid = dir.path().join("dmsql_valid.log");
+    let mut f_valid = File::create(&file_valid).unwrap();
+    writeln!(
+        f_valid,
+        "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) test"
+    )
+    .unwrap();
+    // 非法日志
+    let file_invalid = dir.path().join("dmsql_invalid.log");
+    let mut f_invalid = File::create(&file_invalid).unwrap();
+    writeln!(f_invalid, "bad line").unwrap();
+    // 空日志
+    let file_empty = dir.path().join("dmsql_empty.log");
+    File::create(&file_empty).unwrap();
+    // 非UTF8日志
+    let file_nonutf8 = dir.path().join("dmsql_nonutf8.log");
+    let mut f_nonutf8 = File::create(&file_nonutf8).unwrap();
+    f_nonutf8.write_all(&[0xff, 0xfe, 0xfd]).unwrap();
+    // 非目标文件
+    let file_other = dir.path().join("other.log");
+    let mut f_other = File::create(&file_other).unwrap();
+    writeln!(f_other, "just for test").unwrap();
+    // 执行综合处理
+    let (total_files, total_logs, error_files) = process_sqllog_dir(dir.path()).unwrap();
+    // 只统计 dmsql*.log 文件
+    assert_eq!(total_files, 4);
+    // 合法日志能被解析
+    assert!(total_logs >= 1);
+    // 非法/非UTF8日志会产生错误
+    assert!(
+        error_files
+            .iter()
+            .any(|(fname, _)| fname.contains("dmsql_invalid.log"))
+    );
+    assert!(
+        error_files
+            .iter()
+            .any(|(fname, _)| fname.contains("dmsql_nonutf8.log"))
+    );
+    // 空日志不产生错误
+    assert!(
+        !error_files
+            .iter()
+            .any(|(fname, _)| fname.contains("dmsql_empty.log"))
+    );
+    // 非目标文件不统计
+    assert!(
+        !error_files
+            .iter()
+            .any(|(fname, _)| fname.contains("other.log"))
+    );
+}
