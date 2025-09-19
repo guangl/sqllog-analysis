@@ -3,3 +3,6 @@ sqllog/*
 report/*
 error_files.txt
 logs/*
+# Code coverage reports
+tarpaulin-report.html
+cobertura.xml
