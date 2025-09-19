@@ -279,6 +279,7 @@ fn test_is_first_row_extreme_cases() {
     assert!(!is_first_row("20251010 101010.100"));
 }
 
+#[warn(invalid_from_utf8)]
 #[test]
 fn test_sqllogerror_display_all() {
     use std::io;
