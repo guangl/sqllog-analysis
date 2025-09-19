@@ -6,6 +6,12 @@ authors = ["guangl"]
 description = "达梦数据库的 sqllog 日志分析工具"
 license = "MIT"
 repository = "https://github.com/guangl/sqllog-analysis"
+keywords = ["database", "log", "analysis", "dm", "rust"]
+categories = [
+  "command-line-utilities",
+  "development-tools::debugging",
+  "data-processing",
+]
 
 [dependencies]
 anyhow = "1.0.99"
@@ -15,6 +21,7 @@ lazy_static = "1.4"
 tempfile = "3.8"
 memchr = "2.6"
 thiserror = "1.0"
+windows-sys = "0.61"
 
 log = "0.4"
 env_logger = "0.10"

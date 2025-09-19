@@ -40,7 +40,7 @@ fn test_main_no_log_files() {
             if path.is_file() {
                 if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
                     if filename.starts_with("dmsql") && filename.ends_with(".log") {
-                        println!("处理文件: {}", filename);
+                        println!("处理文件: {filename}");
                     }
                 }
             }

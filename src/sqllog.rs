@@ -83,6 +83,12 @@ impl Sqllog {
     /// * Ok(Some(Sqllog)) - 解析成功
     /// * Ok(None) - 解析失败但不报错
     /// * Err(SqllogError) - 格式错误
+    ///
+    /// # Errors
+    /// 返回 `Err(SqllogError)` 可能原因：
+    /// - 日志格式不匹配（正则未捕获所有字段）
+    /// - 字段解析失败（如数字转换、UTF8 解码等）
+    /// - 其他解析异常
     pub fn from_line(segment: &str, line_num: usize) -> SResult<Option<Self>> {
         // 静态正则表达式，提升性能
         lazy_static! {
@@ -94,7 +100,7 @@ impl Sqllog {
 
         // 只对完整段做正则匹配
         if let Some(caps) = SQLLOG_RE.captures(segment) {
-            trace!("行{} 匹配到 SQLLOG 正则，开始解析字段", line_num);
+            trace!("行{line_num} 匹配到 SQLLOG 正则，开始解析字段");
             let occurrence_time =
                 caps.get(1)
                     .map(|m| m.as_str().to_string())
@@ -241,8 +247,8 @@ impl Sqllog {
                     (None, None, None)
                 };
 
-            trace!("行{} 字段解析成功", line_num);
-            Ok(Some(Sqllog {
+            trace!("行{line_num} 字段解析成功");
+            Ok(Some(Self {
                 occurrence_time,
                 ep,
                 session,
@@ -259,7 +265,7 @@ impl Sqllog {
                 execute_id,
             }))
         } else {
-            trace!("行{} 未匹配到 SQLLOG 正则，内容: {}", line_num, segment);
+            trace!("行{line_num} 未匹配到 SQLLOG 正则，内容: {segment}");
             Err(SqllogError::Format {
                 line: line_num,
                 content: segment.to_string(),
@@ -275,13 +281,19 @@ impl Sqllog {
     /// # 返回
     /// * Ok(Vec<Sqllog>) - 解析成功
     /// * Err(SqllogError) - 解析失败
+    ///
+    /// # Errors
+    /// 返回的错误元组中，`SqllogError` 可能原因：
+    /// - 文件读取失败（IO 错误）
+    /// - 日志行 UTF8 解码失败
+    /// - 日志格式不匹配或字段解析失败
     pub fn from_file_with_errors<P: AsRef<Path>>(
         path: P,
     ) -> (Vec<Self>, Vec<(usize, String, SqllogError)>) {
         let data = match std::fs::read(path.as_ref()) {
             Ok(d) => d,
             Err(e) => {
-                error!("文件读取失败: {:?}, 错误: {}", path.as_ref(), e);
+                error!("文件读取失败: {}, 错误: {}", path.as_ref().display(), e);
                 return (
                     Vec::new(),
                     vec![(0, format!("IO错误: {e}"), SqllogError::Io(e))],
@@ -308,19 +320,16 @@ impl Sqllog {
         let mut line_num = 1;
 
         while offset < total {
-            let end = match memchr(b'\n', &data[offset..]) {
-                Some(e) => offset + e,
-                None => total,
-            };
+            let end = memchr(b'\n', &data[offset..]).map_or(total, |e| offset + e);
             let line = &data[offset..end];
             offset = end + 1;
 
-            let line_trimmed = match line.iter().position(|&b| b != b' ' && b != b'\t') {
-                Some(pos) => &line[pos..],
-                None => line,
-            };
+            let line_trimmed = line
+                .iter()
+                .position(|&b| b != b' ' && b != b'\t')
+                .map_or(line, |pos| &line[pos..]);
 
-            Sqllog::print_progress(offset, total, &mut last_percent);
+            Self::print_progress(offset, total, &mut last_percent);
 
             let line_str = match std::str::from_utf8(line_trimmed) {
                 Ok(s) => s,
@@ -331,16 +340,12 @@ impl Sqllog {
                 }
             };
 
-            let is_new_segment = if let Some(prefix) = line_str.get(0..23) {
-                is_first_row(prefix)
-            } else {
-                false
-            };
+            let is_new_segment = line_str.get(0..23).is_some_and(is_first_row);
 
             if is_new_segment {
                 has_first_row = true;
                 if !segment_buf.is_empty() {
-                    match Sqllog::from_line(&segment_buf, line_num) {
+                    match Self::from_line(&segment_buf, line_num) {
                         Ok(Some(log)) => sqllogs.push(log),
                         Ok(None) => {
                             errors.push((
@@ -380,7 +385,7 @@ impl Sqllog {
 
         // 文件结尾最后一段
         if !segment_buf.is_empty() {
-            match Sqllog::from_line(&segment_buf, line_num) {
+            match Self::from_line(&segment_buf, line_num) {
                 Ok(Some(log)) => sqllogs.push(log),
                 Ok(None) => {
                     errors.push((
@@ -412,6 +417,11 @@ impl Sqllog {
     /// * `total` - 文件总字节数
     /// * `last_percent` - 上次打印的进度百分比
     pub fn print_progress(current: usize, total: usize, last_percent: &mut u8) {
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
         let percent = ((current as f64 / total as f64) * 100.0) as u8;
         if percent >= *last_percent + 5 {
             print!("\r处理进度: {percent}% ");
@@ -422,9 +432,10 @@ impl Sqllog {
 }
 
 /// 判断年份是否为闰年
-#[inline(always)]
+/// 判断年份是否为闰年
+#[must_use]
 const fn is_leap_year(year: u16) -> bool {
-    (year & 3 == 0 && year % 100 != 0) || year % 400 == 0
+    (year.trailing_zeros() >= 2 && year % 100 != 0) || year % 400 == 0
 }
 
 /// 判断一行是否为 SQL 日志的首行（时间戳格式）
@@ -433,8 +444,9 @@ const fn is_leap_year(year: u16) -> bool {
 /// * `s` - 待判断的字符串
 ///
 /// # 返回
-/// * true - 是首行
-/// * false - 非首行
+/// * `true` - 是首行
+/// * `false` - 非首行
+#[must_use]
 pub fn is_first_row(s: &str) -> bool {
     // 首先检查长度是否正确 (23个字符)
     if s.len() != 23 {
@@ -483,10 +495,10 @@ pub fn is_first_row(s: &str) -> bool {
     }
 
     // 年份合法性校验
-    let year = (b[0] - b'0') as u16 * 1000
-        + (b[1] - b'0') as u16 * 100
-        + (b[2] - b'0') as u16 * 10
-        + (b[3] - b'0') as u16;
+    let year = u16::from(b[0] - b'0') * 1000
+        + u16::from(b[1] - b'0') * 100
+        + u16::from(b[2] - b'0') * 10
+        + u16::from(b[3] - b'0');
     if year == 0 {
         return false;
     }

@@ -64,7 +64,7 @@ fn test_from_file_only_invalid_lines() {
     writeln!(file, "123").unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
     assert_eq!(logs.len(), 0);
-    assert!(errors.len() > 0);
+    assert!(!errors.is_empty());
 }
 
 #[test]
@@ -78,8 +78,8 @@ fn test_from_file_invalid_utf8() {
     assert!(
         errors
             .iter()
-            .any(|(_, _, e)| format!("{}", e).contains("UTF"))
-            || errors.len() > 0
+            .any(|(_, _, e)| format!("{e}").contains("UTF"))
+            || !errors.is_empty()
     );
 }
 
@@ -102,7 +102,7 @@ fn test_sqllog_parsing() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.log");
     let mut file = File::create(&file_path).unwrap();
-    writeln!(file, "{}", test_log).unwrap();
+    writeln!(file, "{test_log}").unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
     for (i, log) in logs.iter().enumerate() {
         println!(
@@ -193,7 +193,7 @@ fn test_multiline_description() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test_multiline.log");
     let mut file = std::fs::File::create(&file_path).unwrap();
-    writeln!(file, "{}", test_log).unwrap();
+    writeln!(file, "{test_log}").unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
     assert_eq!(logs.len(), 4);
     assert_eq!(errors.len(), 0);
@@ -206,7 +206,7 @@ fn test_multiline_description() {
 #[test]
 fn test_other_error_display() {
     let err = SqllogError::Other("自定义错误".to_string());
-    assert_eq!(format!("{}", err), "未知错误: 自定义错误");
+    assert_eq!(format!("{err}"), "未知错误: 自定义错误");
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn test_from_file_io_error() {
     let (logs, errors) = Sqllog::from_file_with_errors("not_exist_file.log");
     assert_eq!(logs.len(), 0);
     assert!(errors.iter().any(|(_, _, e)| {
-        let s = format!("{}", e);
+        let s = format!("{e}");
         s.contains("IO错误") || s.contains("No such file") || s.contains("找不到")
     }));
 }
@@ -242,18 +242,18 @@ fn test_sqllogerror_display_all() {
     // 无需 FromUtf8Error，直接用 Utf8Error
     use regex::Error as RegexError;
     let io_err = SqllogError::Io(io::Error::new(io::ErrorKind::Other, "ioerr"));
-    assert!(format!("{}", io_err).contains("IO错误"));
+    assert!(format!("{io_err}").contains("IO错误"));
     // 构造 FromUtf8Error：尝试将非法 UTF8 字节转为 String
     let bytes = [0xff, 0xfe, 0xfd];
     let utf8_err = SqllogError::Utf8(std::str::from_utf8(&bytes).err().unwrap());
     assert!(
-        format!("{}", utf8_err).contains("UTF8")
-            || format!("{}", utf8_err).contains("utf8")
-            || format!("{}", utf8_err).contains("UTF-8")
-            || format!("{}", utf8_err).contains("utf-8")
+        format!("{utf8_err}").contains("UTF8")
+            || format!("{utf8_err}").contains("utf8")
+            || format!("{utf8_err}").contains("UTF-8")
+            || format!("{utf8_err}").contains("utf-8")
     );
     let regex_err = SqllogError::Regex(RegexError::Syntax("bad".to_string()));
-    let disp = format!("{}", regex_err);
+    let disp = format!("{regex_err}");
     assert!(
         disp.contains("regex")
             || disp.contains("正则")
@@ -261,7 +261,7 @@ fn test_sqllogerror_display_all() {
             || disp.contains("syntax")
     );
     let other_err = SqllogError::Other("other branch".to_string());
-    assert!(format!("{}", other_err).contains("未知错误"));
+    assert!(format!("{other_err}").contains("未知错误"));
 }
 
 #[test]
@@ -313,14 +313,8 @@ fn test_appname_ip_edge_cases() {
     let line_ipv6 = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2 appname:TestApp ip:::1:2:3:4:5:6:7:8) test";
     let log = Sqllog::from_line(line_ipv6, 1).unwrap().unwrap();
     // 兼容实际解析结果，appname 可能为 None 或包含 TestApp
-    match &log.appname {
-        Some(val) => assert!(val.starts_with("TestApp")),
-        None => (),
-    }
-    match &log.ip {
-        Some(val) => assert!(val.contains(":")),
-        None => (),
-    }
+    if let Some(val) = &log.appname { assert!(val.starts_with("TestApp")) }
+    if let Some(val) = &log.ip { assert!(val.contains(":")) }
     let line_appname_space = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2 appname:  ip:::ffff:127.0.0.1) test";
     let log = Sqllog::from_line(line_appname_space, 1).unwrap().unwrap();
     assert!(matches!(log.appname, Some(ref s) if s.trim().is_empty()));
@@ -392,7 +386,7 @@ fn test_from_line_format_error_branch() {
     let res = Sqllog::from_line(line, 1);
     assert!(res.is_err());
     if let Err(e) = res {
-        assert!(format!("{}", e).contains("日志格式错误"));
+        assert!(format!("{e}").contains("日志格式错误"));
     }
 }
 
@@ -502,7 +496,7 @@ fn test_from_file_with_errors_last_segment_error() {
     for (i, log) in logs.iter().enumerate() {
         println!("log[{}].description: {:?}", i, log.description);
     }
-    println!("errors: {:?}", errors);
+    println!("errors: {errors:?}");
     assert_eq!(logs.len(), 1);
     assert_eq!(errors.len(), 0);
     assert!(logs[0].description.contains("bad last segment"));
@@ -515,7 +509,7 @@ fn test_from_line_regex_all_fail() {
     let res = Sqllog::from_line(line, 1);
     assert!(res.is_err());
     if let Err(e) = res {
-        assert!(format!("{}", e).contains("日志格式错误"));
+        assert!(format!("{e}").contains("日志格式错误"));
     }
 }
 
@@ -527,7 +521,7 @@ fn test_from_file_with_errors_only_spaces() {
     let mut file = std::fs::File::create(&file_path).unwrap();
     writeln!(file, "   ").unwrap();
     writeln!(file, "\t\t").unwrap();
-    writeln!(file, "").unwrap();
+    writeln!(file).unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
     // 没有有效日志行
     assert!(logs.is_empty());

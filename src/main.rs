@@ -12,12 +12,12 @@ fn main() -> Result<()> {
 
     trace!("开始获取 sqllog 目录");
     let dir = get_sqllog_dir();
-    trace!("获取到 sqllog 目录: {:?}", dir);
+    trace!("获取到 sqllog 目录: {}", dir.display());
     if !dir.exists() {
-        error!("目录不存在: {:?}", std::env::current_dir()?);
+        error!("目录不存在: {}", std::env::current_dir()?.display());
         return Ok(());
     }
-    trace!("开始处理目录: {:?}", dir);
+    trace!("开始处理目录: {}", dir.display());
     let (total_files, total_logs, error_files, elapsed) = process_sqllog_dir(&dir)?;
     info!(
         "解析完成，共处理 {} 个文件，成功解析 {} 条日志，失败解析 {} 条日志，总耗时: {:.2?}",

@@ -24,17 +24,16 @@ impl LogConfig {
                 level = match lvl.to_lowercase().as_str() {
                     "error" => LevelFilter::Error,
                     "warn" => LevelFilter::Warn,
-                    "info" => LevelFilter::Info,
                     "debug" => LevelFilter::Debug,
                     "trace" => LevelFilter::Trace,
                     _ => LevelFilter::Info,
                 };
             }
         }
-        LogConfig { enabled, level }
+        Self { enabled, level }
     }
 
-    /// 初始化日志（flexi_logger），支持日志轮换
+    /// `初始化日志（flexi_logger），支持日志轮换`
     pub fn init(&self) {
         if self.enabled {
             let date = Local::now().format("%Y-%m-%d").to_string();
@@ -43,7 +42,7 @@ impl LogConfig {
                 .log_to_file(
                     FileSpec::default()
                         .directory("logs")
-                        .basename(format!("sqllog-analysis-{}", date)),
+                        .basename(format!("sqllog-analysis-{date}")),
                 )
                 .format_for_files(flexi_logger::detailed_format)
                 .duplicate_to_stdout(Duplicate::Trace)

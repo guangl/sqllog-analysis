@@ -3,13 +3,20 @@ use log::{info, trace};
 use std::env;
 use std::path::PathBuf;
 
-/// 获取 sqllog 文件夹路径，优先命令行参数，否则交互输入
+/// 获取 sqllog 文件夹路径，优先命令行参数，否则交互输入。
+///
+/// # 返回
+/// * `PathBuf` - sqllog 文件夹路径
+///
+/// # Panics
+/// 当交互输入无法读取或 unwrap 失败时会 panic。
+#[must_use]
 pub fn get_sqllog_dir() -> PathBuf {
     // 优先命令行参数
     let mut args = env::args().skip(1);
     if let Some(path) = args.next() {
-        trace!("命令行参数获取 sqllog 路径: {}", path);
-        info!("sqllog 路径: {}", path);
+        trace!("命令行参数获取 sqllog 路径: {path}");
+        info!("sqllog 路径: {path}");
         return PathBuf::from(path);
     }
     // 交互输入

@@ -36,7 +36,7 @@ fn test_from_file_with_errors_invalid_utf8() {
     file.write_all(&[0xff, 0xfe, 0xfd]).unwrap();
     let (_logs, errors) = Sqllog::from_file_with_errors(&file_path);
     // 新实现下，遇到 UTF8 错误会直接跳过该行
-    println!("errors: {:?}", errors);
+    println!("errors: {errors:?}");
     assert!(!errors.is_empty());
     let found_utf8 = errors
         .iter()

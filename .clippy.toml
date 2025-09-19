@@ -1,0 +1,19 @@
+
+# 推荐 clippy 配置说明：
+# 1. 建议用命令行参数启用严格检查：
+#    cargo clippy -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+# 2. .clippy.toml 仅用于高级定制（如 msrv、阈值、特殊规则）。
+
+# 示例：最低支持 Rust 版本
+msrv = "1.70"
+
+# 可选：对部分规则进行定制
+# allow = [
+#     "clippy::module_name_repetitions", # 允许模块名重复
+# ]
+
+# 可选：对部分规则进行强制
+# deny = [
+#     "clippy::unwrap_used",             # 禁止使用 unwrap
+#     "clippy::expect_used",             # 禁止使用 expect
+# ]
