@@ -1,7 +1,7 @@
+use sqllog_analysis::sqllog::Sqllog;
 use std::fs::{self, File};
 use std::io::Write;
 use tempfile::tempdir;
-use sqllog_analysis::sqllog::Sqllog;
 
 #[test]
 fn test_main_dir_not_exist() {

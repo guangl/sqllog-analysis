@@ -10,14 +10,19 @@ pub type SResult<T> = std::result::Result<T, SqllogError>;
 pub enum SqllogError {
     #[error("IO错误: {0}")]
     Io(#[from] std::io::Error),
+
     #[error("UTF8解码错误: {0}")]
     Utf8(#[from] std::str::Utf8Error),
+
     #[error("正则解析错误: {0}")]
     Regex(#[from] regex::Error),
+
     #[error("字段解析错误: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
+
     #[error("日志格式错误: 行{line}: {content}")]
     Format { line: usize, content: String },
+
     #[error("未知错误: {0}")]
     Other(String),
 }
@@ -380,15 +385,24 @@ impl Sqllog {
                 Ok(s) => s,
                 Err(e) => return Err(SqllogError::Utf8(e)),
             };
-            if line_str.len() >= 23 && is_first_row(&line_str[0..23]) {
-                if let Some(log) = current_log.take() {
-                    sqllogs.push(log);
+            // 为了避免在包含多字节 UTF-8 字符的行上按字节索引导致 panic，
+            // 使用安全的 `get(0..23)` 来尝试取得前 23 个字节对应的 &str。
+            if let Some(prefix) = line_str.get(0..23) {
+                if is_first_row(prefix) {
+                    if let Some(log) = current_log.take() {
+                        sqllogs.push(log);
+                    }
+                    current_log = match Self::from_line(line_str, line_num)? {
+                        Some(log) => Some(log),
+                        None => None,
+                    };
+                    // 处理完第一行后继续下一行
+                    line_num += 1;
+                    continue;
                 }
-                current_log = match Self::from_line(line_str, line_num)? {
-                    Some(log) => Some(log),
-                    None => None,
-                };
-            } else if let Some(log) = current_log.as_mut() {
+            }
+
+            if let Some(log) = current_log.as_mut() {
                 log.description.push('\n');
                 log.description.push_str(line_str);
             }
