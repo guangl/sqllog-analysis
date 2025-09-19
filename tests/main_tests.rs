@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::let_unit_value)]
 use sqllog_analysis::sqllog::Sqllog;
 use std::fs::{self, File};
 use std::io::Write;

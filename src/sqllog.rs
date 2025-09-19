@@ -71,7 +71,7 @@ pub struct Sqllog {
     pub execute_id: Option<u64>,
 }
 
-#[warn(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 impl Sqllog {
     /// 构造函数，组装所有字段
     pub fn new(

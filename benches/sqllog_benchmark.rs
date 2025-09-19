@@ -1,3 +1,4 @@
+#![allow(clippy::uninlined_format_args)]
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::io::Write;
 

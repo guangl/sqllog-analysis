@@ -1,3 +1,8 @@
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::io_other_error)]
+#![allow(clippy::let_unit_value)]
+#![allow(clippy::single_match)]
+#![allow(invalid_from_utf8)]
 use sqllog_analysis::sqllog::*;
 use std::fs::File;
 use std::io::Write;
