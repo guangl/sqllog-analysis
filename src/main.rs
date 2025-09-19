@@ -28,7 +28,7 @@ fn main() -> Result<()> {
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             if name.starts_with("dmsql") && name.ends_with(".log") {
                 total_files += 1;
-                println!("\n开始解析文件: {}", name);
+                println!("\n开始解析文件: {name}");
                 let start = Instant::now();
                 // 优化分段缓冲逻辑
                 let file = std::fs::File::open(&path)?;
@@ -43,7 +43,7 @@ fn main() -> Result<()> {
                     let line = match line {
                         Ok(l) => l,
                         Err(e) => {
-                            error_files_local.push((name.to_string(), format!("读取失败: {}", e)));
+                            error_files_local.push((name.to_string(), format!("读取失败: {e}")));
                             continue;
                         }
                     };
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
                                 }
                                 Err(e) => error_files_local.push((
                                     name.to_string(),
-                                    format!("{}\n内容: {}", e, segment_buf),
+                                    format!("{e}\n内容: {segment_buf}"),
                                 )),
                             }
                             segment_buf.clear();
@@ -78,11 +78,11 @@ fn main() -> Result<()> {
                         Ok(Some(log)) => logs.push(log),
                         Ok(None) => error_files_local.push((name.to_string(), segment_buf.clone())),
                         Err(e) => error_files_local
-                            .push((name.to_string(), format!("{}\n内容: {}", e, segment_buf))),
+                            .push((name.to_string(), format!("{e}\n内容: {segment_buf}"))),
                     }
                 }
                 let elapsed = start.elapsed();
-                println!("文件 {} 解析耗时: {:.2?}", name, elapsed);
+                println!("文件 {name} 解析耗时: {elapsed:.2?}");
                 total_logs += logs.len();
                 error_files.extend(error_files_local);
             }
@@ -90,8 +90,7 @@ fn main() -> Result<()> {
     }
 
     println!(
-        "\n解析完成，共处理 {} 个文件，成功解析 {} 条日志。",
-        total_files, total_logs
+        "\n解析完成，共处理 {total_files} 个文件，成功解析 {total_logs} 条日志。"
     );
     if !error_files.is_empty() {
         println!("\n以下文件解析失败，已写入 error_files.txt:");
@@ -101,8 +100,8 @@ fn main() -> Result<()> {
             .truncate(true)
             .open("error_files.txt")?;
         for (fname, content) in &error_files {
-            writeln!(file, "{}: {}", fname, content)?;
-            println!("  {}: {}", fname, content);
+            writeln!(file, "{fname}: {content}")?;
+            println!("  {fname}: {content}");
         }
     }
     Ok(())

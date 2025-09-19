@@ -71,6 +71,7 @@ pub struct Sqllog {
     pub execute_id: Option<u64>,
 }
 
+#[warn(clippy::too_many_arguments)]
 impl Sqllog {
     /// 构造函数，组装所有字段
     pub fn new(
@@ -309,7 +310,7 @@ impl Sqllog {
     fn print_progress(current: usize, total: usize, last_percent: &mut u8) {
         let percent = ((current as f64 / total as f64) * 100.0) as u8;
         if percent >= *last_percent + 5 {
-            print!("\r处理进度: {}% ", percent);
+            print!("\r处理进度: {percent}% ");
             std::io::Write::flush(&mut std::io::stdout()).ok();
             *last_percent = percent;
         }
@@ -348,7 +349,7 @@ impl Sqllog {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
-        println!("开始处理文件: {}", file_name);
+        println!("开始处理文件: {file_name}");
         let total = data.len();
         if total == 0 {
             // 空文件直接返回 Ok(Vec::new)
