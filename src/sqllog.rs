@@ -8,6 +8,9 @@ use thiserror::Error; // 错误类型派生
 /// 通用结果类型，统一错误处理
 pub type SResult<T> = std::result::Result<T, SqllogError>;
 
+// 简短类型别名，表示 description 中解析出的三个可选数字
+type DescNumbers = (Option<u64>, Option<u64>, Option<u64>);
+
 /// 日志解析相关错误类型
 #[derive(Error, Debug)]
 pub enum SqllogError {
@@ -92,178 +95,16 @@ impl Sqllog {
     pub fn from_line(segment: &str, line_num: usize) -> SResult<Option<Self>> {
         // 静态正则表达式，提升性能
         lazy_static! {
-            static ref SQLLOG_RE: Regex = Regex::new(r"(?s)(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \(EP\[(\d+)\] sess:(NULL|0x[0-9a-f]+) thrd:(-1|NULL|\d+) user:(NULL|\w+) trxid:(NULL|\d+) stmt:(NULL|0x[0-9a-f]+)(?:\sappname:(.*?))?(?:\sip(?::(?:::ffff:)?([0-9]{1,3}(?:\.[0-9]{1,3}){3}))?)?\)\s(?:\[(INS|DEL|ORA|UPD|SEL)\]:?\s)?((?:.|\n)*)"
-            ).unwrap();
-            static ref DESC_RE: Regex = Regex::new(r"EXECTIME:\s*(\d+)\(ms\)\s*ROWCOUNT:\s*(\d+)\s*EXEC_ID:\s*(\d+)."
-            ).unwrap();
+            static ref SQLLOG_RE: Regex = Regex::new(r"(?s)(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \(EP\[(\d+)\] sess:(NULL|0x[0-9a-f]+) thrd:(-1|NULL|\d+) user:(NULL|\w+) trxid:(NULL|\d+) stmt:(NULL|0x[0-9a-f]+)(?:\sappname:(.*?))?(?:\sip(?::(?:::ffff:)?([0-9]{1,3}(?:\.[0-9]{1,3}){3}))?)?\)\s(?:\[(INS|DEL|ORA|UPD|SEL)\]:?\s)?((?:.|\n)*)").unwrap();
         }
 
         // 只对完整段做正则匹配
         if let Some(caps) = SQLLOG_RE.captures(segment) {
             trace!("行{line_num} 匹配到 SQLLOG 正则，开始解析字段");
-            let occurrence_time =
-                caps.get(1)
-                    .map(|m| m.as_str().to_string())
-                    .ok_or_else(|| SqllogError::Format {
-                        line: line_num,
-                        content: segment.to_string(),
-                    })?;
-            let ep = caps
-                .get(2)
-                .ok_or_else(|| SqllogError::Format {
-                    line: line_num,
-                    content: segment.to_string(),
-                })?
-                .as_str()
-                .parse()
-                .map_err(|_| SqllogError::Format {
-                    line: line_num,
-                    content: segment.to_string(),
-                })?;
-
-            // 处理可能为 NULL 的字段
-            let session = match caps.get(3).map(|m| m.as_str()) {
-                Some("NULL") => None,
-                Some(s) => Some(s.to_string()),
-                None => {
-                    return Err(SqllogError::Format {
-                        line: line_num,
-                        content: segment.to_string(),
-                    });
-                }
-            };
-            let thread = match caps.get(4).map(|m| m.as_str()) {
-                Some("NULL") => None,
-                Some("-1") => Some("-1".to_string()),
-                Some(s) => Some(s.to_string()),
-                None => {
-                    return Err(SqllogError::Format {
-                        line: line_num,
-                        content: segment.to_string(),
-                    });
-                }
-            };
-            let user = match caps.get(5).map(|m| m.as_str()) {
-                Some("NULL") => None,
-                Some(s) => Some(s.to_string()),
-                None => {
-                    return Err(SqllogError::Format {
-                        line: line_num,
-                        content: segment.to_string(),
-                    });
-                }
-            };
-            let trx_id = match caps.get(6).map(|m| m.as_str()) {
-                Some("NULL") => None,
-                Some(s) => Some(s.to_string()),
-                None => {
-                    return Err(SqllogError::Format {
-                        line: line_num,
-                        content: segment.to_string(),
-                    });
-                }
-            };
-            let statement = match caps.get(7).map(|m| m.as_str()) {
-                Some("NULL") => None,
-                Some(s) => Some(s.to_string()),
-                None => {
-                    return Err(SqllogError::Format {
-                        line: line_num,
-                        content: segment.to_string(),
-                    });
-                }
-            };
-            let appname = caps.get(8).and_then(|m| {
-                let s = m.as_str();
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s.to_string())
-                }
-            });
-            let ip = caps.get(9).and_then(|m| {
-                let s = m.as_str();
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s.to_string())
-                }
-            });
-            let sql_type = caps.get(10).map(|m| m.as_str().to_string());
-            let description = caps
-                .get(11)
-                .map(|m| m.as_str().to_string())
-                .ok_or_else(|| SqllogError::Format {
-                    line: line_num,
-                    content: segment.to_string(),
-                })?;
-            let (execute_time, rowcount, execute_id) =
-                if let Some(desc_caps) = DESC_RE.captures(&description) {
-                    (
-                        Some(
-                            desc_caps
-                                .get(1)
-                                .ok_or_else(|| SqllogError::Format {
-                                    line: line_num,
-                                    content: description.clone(),
-                                })?
-                                .as_str()
-                                .parse()
-                                .map_err(|_| SqllogError::Format {
-                                    line: line_num,
-                                    content: description.clone(),
-                                })?,
-                        ),
-                        Some(
-                            desc_caps
-                                .get(2)
-                                .ok_or_else(|| SqllogError::Format {
-                                    line: line_num,
-                                    content: description.clone(),
-                                })?
-                                .as_str()
-                                .parse()
-                                .map_err(|_| SqllogError::Format {
-                                    line: line_num,
-                                    content: description.clone(),
-                                })?,
-                        ),
-                        Some(
-                            desc_caps
-                                .get(3)
-                                .ok_or_else(|| SqllogError::Format {
-                                    line: line_num,
-                                    content: description.clone(),
-                                })?
-                                .as_str()
-                                .parse()
-                                .map_err(|_| SqllogError::Format {
-                                    line: line_num,
-                                    content: description.clone(),
-                                })?,
-                        ),
-                    )
-                } else {
-                    (None, None, None)
-                };
-
+            // 将字段解析提取到私有方法，减少本方法长度
+            let log = Self::parse_fields(&caps, segment, line_num)?;
             trace!("行{line_num} 字段解析成功");
-            Ok(Some(Self {
-                occurrence_time,
-                ep,
-                session,
-                thread,
-                user,
-                trx_id,
-                statement,
-                appname,
-                ip,
-                sql_type,
-                description,
-                execute_time,
-                rowcount,
-                execute_id,
-            }))
+            Ok(Some(log))
         } else {
             trace!("行{line_num} 未匹配到 SQLLOG 正则，内容: {segment}");
             Err(SqllogError::Format {
@@ -271,6 +112,201 @@ impl Sqllog {
                 content: segment.to_string(),
             })
         }
+    }
+
+    // 将字段解析抽离为私有辅助函数，保持行为不变（主解析逻辑尽量简短以通过 clippy::too_many_lines）
+    fn parse_fields(caps: &regex::Captures, segment: &str, line_num: usize) -> SResult<Self> {
+        let occurrence_time = Self::get_capture(caps, 1, line_num, segment)?;
+        let ep: i32 = Self::get_capture(caps, 2, line_num, segment)?
+            .parse()
+            .map_err(|_| SqllogError::Format {
+                line: line_num,
+                content: segment.to_string(),
+            })?;
+
+        let session = Self::parse_optional(caps, 3, line_num, segment)?;
+        let thread = match caps.get(4).map(|m| m.as_str()) {
+            Some("NULL") => None,
+            Some("-1") => Some("-1".to_string()),
+            Some(s) => Some(s.to_string()),
+            None => {
+                return Err(SqllogError::Format {
+                    line: line_num,
+                    content: segment.to_string(),
+                });
+            }
+        };
+        let user = Self::parse_optional(caps, 5, line_num, segment)?;
+        let trx_id = Self::parse_optional(caps, 6, line_num, segment)?;
+        let statement = Self::parse_optional(caps, 7, line_num, segment)?;
+        let appname = caps.get(8).and_then(|m| {
+            let s = m.as_str();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        });
+        let ip = caps.get(9).and_then(|m| {
+            let s = m.as_str();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        });
+        let sql_type = caps.get(10).map(|m| m.as_str().to_string());
+        let description = Self::get_capture(caps, 11, line_num, segment)?;
+
+        let (execute_time, rowcount, execute_id): DescNumbers =
+            Self::parse_desc_numbers(&description, line_num)?;
+
+        Ok(Self {
+            occurrence_time,
+            ep,
+            session,
+            thread,
+            user,
+            trx_id,
+            statement,
+            appname,
+            ip,
+            sql_type,
+            description,
+            execute_time,
+            rowcount,
+            execute_id,
+        })
+    }
+
+    // 私有 helper：获取 capture 内容或返回 Format 错误
+    fn get_capture(
+        caps: &regex::Captures,
+        idx: usize,
+        line_num: usize,
+        seg: &str,
+    ) -> Result<String, SqllogError> {
+        caps.get(idx)
+            .map(|m| m.as_str().to_string())
+            .ok_or_else(|| SqllogError::Format {
+                line: line_num,
+                content: seg.to_string(),
+            })
+    }
+
+    // 私有 helper：解析可能为 NULL 的字段
+    fn parse_optional(
+        caps: &regex::Captures,
+        idx: usize,
+        line_num: usize,
+        seg: &str,
+    ) -> Result<Option<String>, SqllogError> {
+        match caps.get(idx).map(|m| m.as_str()) {
+            Some("NULL") => Ok(None),
+            Some(s) => Ok(Some(s.to_string())),
+            None => Err(SqllogError::Format {
+                line: line_num,
+                content: seg.to_string(),
+            }),
+        }
+    }
+
+    // 私有 helper：从 description 中解析 execute_time, rowcount, execute_id
+    fn parse_desc_numbers(desc: &str, line_num: usize) -> Result<DescNumbers, SqllogError> {
+        lazy_static! {
+            static ref DESC_RE_INNER: Regex =
+                Regex::new(r"EXECTIME:\s*(\d+)\(ms\)\s*ROWCOUNT:\s*(\d+)\s*EXEC_ID:\s*(\d+).")
+                    .unwrap();
+        }
+        if let Some(desc_caps) = DESC_RE_INNER.captures(desc) {
+            let et = desc_caps
+                .get(1)
+                .ok_or_else(|| SqllogError::Format {
+                    line: line_num,
+                    content: desc.to_string(),
+                })?
+                .as_str()
+                .parse()
+                .map_err(|_| SqllogError::Format {
+                    line: line_num,
+                    content: desc.to_string(),
+                })?;
+            let rc = desc_caps
+                .get(2)
+                .ok_or_else(|| SqllogError::Format {
+                    line: line_num,
+                    content: desc.to_string(),
+                })?
+                .as_str()
+                .parse()
+                .map_err(|_| SqllogError::Format {
+                    line: line_num,
+                    content: desc.to_string(),
+                })?;
+            let eid = desc_caps
+                .get(3)
+                .ok_or_else(|| SqllogError::Format {
+                    line: line_num,
+                    content: desc.to_string(),
+                })?
+                .as_str()
+                .parse()
+                .map_err(|_| SqllogError::Format {
+                    line: line_num,
+                    content: desc.to_string(),
+                })?;
+            Ok((Some(et), Some(rc), Some(eid)))
+        } else {
+            Ok((None, None, None))
+        }
+    }
+
+    // helper: flush 当前 segment_buf，调用 from_line 并把结果写入 sqllogs/errors
+    fn flush_segment_buf(
+        segment_buf: &str,
+        line_num: usize,
+        sqllogs: &mut Vec<Self>,
+        errors: &mut Vec<(usize, String, SqllogError)>,
+    ) {
+        match Self::from_line(segment_buf, line_num) {
+            Ok(Some(log)) => sqllogs.push(log),
+            Ok(None) => errors.push((
+                line_num,
+                segment_buf.to_string(),
+                SqllogError::Format {
+                    line: line_num,
+                    content: segment_buf.to_string(),
+                },
+            )),
+            Err(e) => errors.push((line_num, segment_buf.to_string(), e)),
+        }
+    }
+
+    // helper: 处理单行文本，包含新段检测、flush 与合并到 segment_buf
+    fn process_line(
+        line_str: &str,
+        has_first_row: &mut bool,
+        segment_buf: &mut String,
+        line_num: &mut usize,
+        sqllogs: &mut Vec<Self>,
+        errors: &mut Vec<(usize, String, SqllogError)>,
+    ) {
+        let is_new_segment = line_str.get(0..23).is_some_and(is_first_row);
+
+        if is_new_segment {
+            *has_first_row = true;
+            if !segment_buf.is_empty() {
+                Self::flush_segment_buf(segment_buf, *line_num, sqllogs, errors);
+                segment_buf.clear();
+            }
+            *line_num = 1;
+        }
+
+        if !segment_buf.is_empty() {
+            segment_buf.push('\n');
+        }
+        segment_buf.push_str(line_str);
+        *line_num += 1;
     }
 
     /// 从文件批量解析 SQL 日志，自动分段
@@ -300,11 +336,21 @@ impl Sqllog {
                 );
             }
         };
+
         let file_name = path
             .as_ref()
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
+
+        Self::process_bytes(&data, file_name)
+    }
+
+    // helper: 处理整个文件的字节数据，返回解析的 sqllogs 与错误
+    fn process_bytes(
+        data: &[u8],
+        file_name: &str,
+    ) -> (Vec<Self>, Vec<(usize, String, SqllogError)>) {
         trace!("开始处理文件: {file_name}");
         let total = data.len();
         if total == 0 {
@@ -315,63 +361,50 @@ impl Sqllog {
         let mut sqllogs = Vec::with_capacity(1_000_000);
         let mut errors = Vec::new();
         let mut has_first_row = false;
-        let mut offset = 0;
+        let mut offset = 0usize;
         let mut segment_buf = String::new();
-        let mut line_num = 1;
+        let mut line_num = 1usize;
+
+        // 使用 impl 上的 helper
 
         while offset < total {
-            let end = memchr(b'\n', &data[offset..]).map_or(total, |e| offset + e);
-            let line = &data[offset..end];
-            offset = end + 1;
-
-            let line_trimmed = line
-                .iter()
-                .position(|&b| b != b' ' && b != b'\t')
-                .map_or(line, |pos| &line[pos..]);
+            let (line_trimmed, next) = Self::next_raw_line_impl(data, offset, total);
+            offset = next;
 
             Self::print_progress(offset, total, &mut last_percent);
 
-            let line_str = match std::str::from_utf8(line_trimmed) {
-                Ok(s) => s,
-                Err(e) => {
-                    errors.push((line_num, format!("{line_trimmed:?}"), SqllogError::Utf8(e)));
-                    has_first_row = true; // 只要有任何行被处理，避免被覆盖为 Other
-                    continue;
-                }
-            };
-
-            let is_new_segment = line_str.get(0..23).is_some_and(is_first_row);
-
-            if is_new_segment {
-                has_first_row = true;
-                if !segment_buf.is_empty() {
-                    match Self::from_line(&segment_buf, line_num) {
-                        Ok(Some(log)) => sqllogs.push(log),
-                        Ok(None) => {
-                            errors.push((
-                                line_num,
-                                segment_buf.clone(),
-                                SqllogError::Format {
-                                    line: line_num,
-                                    content: segment_buf.clone(),
-                                },
-                            ));
-                        }
-                        Err(e) => errors.push((line_num, segment_buf.clone(), e)),
-                    }
-                    segment_buf.clear();
-                }
-                line_num = 1;
+            if Self::handle_raw_line_impl(
+                line_trimmed,
+                &mut line_num,
+                &mut has_first_row,
+                &mut segment_buf,
+                &mut sqllogs,
+                &mut errors,
+            ) == Err(())
+            {
+                // handle_raw_line_impl 已在 errors 中记录，继续循环
             }
-
-            // 无论是否新 segment，都合并当前行到 segment_buf
-            if !segment_buf.is_empty() {
-                segment_buf.push('\n');
-            }
-            segment_buf.push_str(line_str);
-            line_num += 1;
         }
 
+        Self::finalize_segments(
+            has_first_row,
+            &segment_buf,
+            line_num,
+            file_name,
+            sqllogs,
+            errors,
+        )
+    }
+
+    // helper: 在处理完所有字节后收尾，返回解析结果
+    fn finalize_segments(
+        has_first_row: bool,
+        segment_buf: &str,
+        line_num: usize,
+        file_name: &str,
+        mut sqllogs: Vec<Self>,
+        mut errors: Vec<(usize, String, SqllogError)>,
+    ) -> (Vec<Self>, Vec<(usize, String, SqllogError)>) {
         if !has_first_row {
             return (
                 Vec::new(),
@@ -385,20 +418,7 @@ impl Sqllog {
 
         // 文件结尾最后一段
         if !segment_buf.is_empty() {
-            match Self::from_line(&segment_buf, line_num) {
-                Ok(Some(log)) => sqllogs.push(log),
-                Ok(None) => {
-                    errors.push((
-                        line_num,
-                        segment_buf.clone(),
-                        SqllogError::Format {
-                            line: line_num,
-                            content: segment_buf.clone(),
-                        },
-                    ));
-                }
-                Err(e) => errors.push((line_num, segment_buf.clone(), e)),
-            }
+            Self::flush_segment_buf(segment_buf, line_num, &mut sqllogs, &mut errors);
         }
 
         info!(
@@ -408,6 +428,56 @@ impl Sqllog {
             errors.len()
         );
         (sqllogs, errors)
+    }
+
+    // 将内部 helper 提升为 impl 方法，便于测试与复用
+    fn next_raw_line_impl(data: &[u8], offset: usize, total: usize) -> (&[u8], usize) {
+        let end = memchr(b'\n', &data[offset..]).map_or(total, |e| offset + e);
+        let line = &data[offset..end];
+        let next = end + 1;
+        let line_trimmed = line
+            .iter()
+            .position(|&b| b != b' ' && b != b'\t')
+            .map_or(line, |pos| &line[pos..]);
+        (line_trimmed, next)
+    }
+
+    fn line_bytes_to_str_impl<'a>(
+        line_bytes: &'a [u8],
+        line_num: usize,
+        errors: &mut Vec<(usize, String, SqllogError)>,
+    ) -> Option<&'a str> {
+        match std::str::from_utf8(line_bytes) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                errors.push((line_num, format!("{line_bytes:?}"), SqllogError::Utf8(e)));
+                None
+            }
+        }
+    }
+
+    fn handle_raw_line_impl(
+        line_bytes: &[u8],
+        line_num: &mut usize,
+        has_first_row: &mut bool,
+        segment_buf: &mut String,
+        sqllogs: &mut Vec<Self>,
+        errors: &mut Vec<(usize, String, SqllogError)>,
+    ) -> Result<(), ()> {
+        let Some(line_str) = Self::line_bytes_to_str_impl(line_bytes, *line_num, errors) else {
+            *has_first_row = true;
+            return Err(());
+        };
+
+        Self::process_line(
+            line_str,
+            has_first_row,
+            segment_buf,
+            line_num,
+            sqllogs,
+            errors,
+        );
+        Ok(())
     }
 
     /// 进度打印辅助函数

@@ -7,10 +7,14 @@
 # 示例：最低支持 Rust 版本
 msrv = "1.70"
 
-# 可选：对部分规则进行定制
-# allow = [
-#     "clippy::module_name_repetitions", # 允许模块名重复
-# ]
+
+# 允许某些 crate 出现多个版本而不触发 clippy::multiple_crate_versions
+allowed-duplicate-crates = [
+  "windows-sys",
+  "windows-link",
+  "thiserror",
+  "thiserror-impl",
+]
 
 # 可选：对部分规则进行强制
 # deny = [

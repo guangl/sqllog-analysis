@@ -14,24 +14,27 @@ categories = [
 ]
 
 [dependencies]
-anyhow = "1.0.99"
-dialoguer = { version = "0.12.0", features = ["fuzzy-select"] }
-regex = "1.10"
-lazy_static = "1.4"
-tempfile = "3.8"
-memchr = "2.6"
-thiserror = "1.0"
-windows-sys = "0.61"
-
+anyhow = "1.0.100"
+# dialoguer replaced by std::io to avoid pulling console/terminal transitive deps
+regex = "1.11"
+lazy_static = "1.5"
+tempfile = "3.22"
+memchr = "2.7"
+thiserror = "2.0"
+# windows-sys 由依赖树自动选择，不需要显式声明，移除以减少多版本约束
 log = "0.4"
-env_logger = "0.10"
-flexi_logger = "0.27"
+# use tracing + tracing-subscriber to avoid pulling anstream/anstyle
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+# rolling file appender for tracing
+tracing-appender = "0.2"
+# flexi_logger removed in favor of env_logger to reduce transitive windows-* versions
 chrono = "0.4"
 
 [dev-dependencies]
-criterion = "0.5"
-regex = "1.10"
-lazy_static = "1.4"
+criterion = "0.7"
+regex = "1.11"
+lazy_static = "1.5"
 chrono = "0.4"
 
 [[bench]]

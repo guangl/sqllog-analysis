@@ -1,4 +1,4 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use regex::Regex;
 use sqllog_analysis::sqllog::is_first_row;
 
@@ -25,32 +25,32 @@ fn datetime_benchmark(c: &mut Criterion) {
 
     // 测试自定义实现 - 有效日期
     group.bench_function("custom_valid", |b| {
-        b.iter(|| is_first_row(black_box(valid_date)))
+        b.iter(|| is_first_row(std::hint::black_box(valid_date)))
     });
 
     // 测试自定义实现 - 无效日期
     group.bench_function("custom_invalid", |b| {
-        b.iter(|| is_first_row(black_box(invalid_date)))
+        b.iter(|| is_first_row(std::hint::black_box(invalid_date)))
     });
 
     // 测试正则表达式实现 - 有效日期
     group.bench_function("regex_valid", |b| {
-        b.iter(|| validate_with_regex(black_box(valid_date)))
+        b.iter(|| validate_with_regex(std::hint::black_box(valid_date)))
     });
 
     // 测试正则表达式实现 - 无效日期
     group.bench_function("regex_invalid", |b| {
-        b.iter(|| validate_with_regex(black_box(invalid_date)))
+        b.iter(|| validate_with_regex(std::hint::black_box(invalid_date)))
     });
 
     // 测试 chrono 实现 - 有效日期
     group.bench_function("chrono_valid", |b| {
-        b.iter(|| validate_with_chrono(black_box(valid_date)))
+        b.iter(|| validate_with_chrono(std::hint::black_box(valid_date)))
     });
 
     // 测试 chrono 实现 - 无效日期
     group.bench_function("chrono_invalid", |b| {
-        b.iter(|| validate_with_chrono(black_box(invalid_date)))
+        b.iter(|| validate_with_chrono(std::hint::black_box(invalid_date)))
     });
 
     group.finish();
