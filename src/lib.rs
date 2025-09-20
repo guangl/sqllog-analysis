@@ -1,5 +1,6 @@
 #![allow(clippy::multiple_crate_versions)]
 
+pub mod config;
 pub mod duckdb_writer;
 pub mod input_path;
 pub mod process;

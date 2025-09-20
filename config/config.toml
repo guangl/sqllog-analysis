@@ -1,0 +1,29 @@
+# sqllog-analysis 配置示例（分组 TOML）
+# 优先级（高->低）：配置文件（本文件） -> 指定的配置文件 -> 默认值
+
+# Database 配置：控制 DuckDB 路径与写入行为
+[database]
+# DuckDB 数据库文件路径（默认：sqllogs.duckdb）
+# 示例（Windows）：
+# db_path = "C:\\data\\sqllogs.duckdb"
+db_path = "sqllogs.duckdb"
+
+# 每次写入的批大小（默认：1000）
+# chunk_size = 1000
+chunk_size = 1000
+
+# 是否在写入后创建索引（默认：true）
+# create_indexes = true
+create_indexes = true
+
+
+# Log 配置：控制终端输出与日志目录
+[log]
+# 是否在 stdout 输出日志（若未设置：debug 构建默认开启，release 默认关闭）
+# enable_stdout = true
+enable_stdout = true
+
+# 日志输出目录（默认：./logs）
+# Windows 示例： log_dir = "C:\\var\\log\\sqllog-analysis"
+# Unix 示例：    log_dir = "/var/log/sqllog-analysis"
+# log_dir = "./logs"
