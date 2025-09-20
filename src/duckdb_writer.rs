@@ -2,6 +2,7 @@ use crate::sqllog::Sqllog;
 use anyhow::{Context, Result};
 use duckdb::{Connection, ToSql, appender_params_from_iter, params};
 use log::{debug, info, warn};
+use serde::Serialize;
 use std::env;
 use std::path::Path;
 use std::time::Instant;
@@ -58,7 +59,7 @@ pub fn write_sqllogs_to_duckdb_with_chunk<P: AsRef<Path>>(
 /// Returns an error if opening the database, creating the table, appender usage,
 /// or index creation fails.
 /// Reports the result of attempting to create an index.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct IndexReport {
     /// The CREATE INDEX statement executed.
     pub statement: String,
