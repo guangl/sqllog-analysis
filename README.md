@@ -93,7 +93,7 @@ sqllog_analysis::duckdb_writer::set_inject_bad_index(true);
 // cargo test --test duckdb_index_failure -- --nocapture
 ```
 
-在多数情况下，CI 不需要任何环境变量；只需在 CI job 中运行相应的测试即可。若你确实要在 CI 中做等效的外部注入（仅在特殊情况/验证时），也可以使用自定义脚本或额外的测试专用 binary，但默认推荐使用 crate 提供的测试 helper。 
+在多数情况下，CI 不需要任何环境变量；只需在 CI job 中运行相应的测试即可。若你确实要在 CI 中做等效的外部注入（仅在特殊情况/验证时），也可以使用自定义脚本或额外的测试专用 binary，但默认推荐使用 crate 提供的测试 helper。
 
 注意：索引通常会在批量插入之后创建以获得更好的插入性能。若你希望索引创建失败能回滚整个批次，或者希望把索引创建改为一次性原子操作，可以在调用处实现更高层的事务控制或修改写入器行为（当前实现为每个索引独立短事务，并在 `IndexReport` 中报告失败）。
 

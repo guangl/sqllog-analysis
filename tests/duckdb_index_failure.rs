@@ -1,9 +1,9 @@
 #![cfg(feature = "test-helpers")]
 
 use sqllog_analysis::duckdb_writer;
+use sqllog_analysis::duckdb_writer::set_inject_bad_index;
 use sqllog_analysis::sqllog::Sqllog;
 use tempfile::tempdir;
-use sqllog_analysis::duckdb_writer::set_inject_bad_index;
 
 #[test]
 fn test_index_creation_failure_reports_error() {
