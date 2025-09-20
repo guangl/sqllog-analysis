@@ -1,15 +1,14 @@
+#![cfg(feature = "test-helpers")]
+
 use sqllog_analysis::duckdb_writer;
 use sqllog_analysis::sqllog::Sqllog;
-use std::env;
 use tempfile::tempdir;
+use sqllog_analysis::duckdb_writer::set_inject_bad_index;
 
 #[test]
 fn test_index_creation_failure_reports_error() {
-    // instruct writer to inject a bad index statement
-    unsafe {
-        env::set_var("SQLOG_INJECT_BAD_INDEX", "1");
-        env::set_var("SQLOG_CREATE_INDEXES", "1");
-    }
+    // instruct writer to inject a bad index statement via test helper
+    set_inject_bad_index(true);
 
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("test_sqllogs_bad.duckdb");

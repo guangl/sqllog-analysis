@@ -15,35 +15,22 @@ pub struct LogConfig {
     pub enabled: bool,
     pub level: LevelFilter,
     pub log_file: Option<PathBuf>,
+    pub enable_stdout: Option<bool>,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            level: LevelFilter::Info,
+            log_file: None,
+            enable_stdout: None,
+        }
+    }
 }
 
 impl LogConfig {
-    /// 从命令行参数解析日志配置
-    pub fn from_args<I: Iterator<Item = String>>(args: I) -> Self {
-        let mut enabled = true;
-        let mut level = LevelFilter::Info;
-        let mut log_file: Option<PathBuf> = None;
-        for arg in args {
-            if arg == "--no-log" {
-                enabled = false;
-            } else if let Some(lvl) = arg.strip_prefix("--log-level=") {
-                level = match lvl.to_lowercase().as_str() {
-                    "error" => LevelFilter::Error,
-                    "warn" => LevelFilter::Warn,
-                    "debug" => LevelFilter::Debug,
-                    "trace" => LevelFilter::Trace,
-                    _ => LevelFilter::Info,
-                };
-            } else if let Some(path) = arg.strip_prefix("--log-file=") {
-                log_file = Some(PathBuf::from(path));
-            }
-        }
-        Self {
-            enabled,
-            level,
-            log_file,
-        }
-    }
+    // 日志配置逻辑：当前通过 `Default` 提供默认配置
 
     /// 初始化日志（使用 `env_logger`）
     ///
@@ -57,7 +44,6 @@ impl LogConfig {
         let filter = EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| EnvFilter::new(format!("{}", self.level)));
 
-        // 默认：如果没有传入 --log-file，则使用当前工作目录下的 `logs` 目录
         let dir = self.log_file.as_ref().map_or_else(
             || {
                 let mut p = match env::current_dir() {
@@ -101,10 +87,17 @@ impl LogConfig {
         // 可以安全地使用 non_blocking writer（简洁且比 std::mem::forget 更明确）。
         let _guard_ref: &'static _ = Box::leak(Box::new(guard));
 
-        // 创建两个输出层：stdout 层与文件层，注册到全局 subscriber
+        // 创建输出层：文件层始终启用；stdout 层使用配置中的值（若指定），否则在 debug 构建启用，在 release 构建关闭。
+        let enable_stdout = self.enable_stdout.unwrap_or(cfg!(debug_assertions));
+        let stdout_filter = if enable_stdout {
+            filter.clone()
+        } else {
+            EnvFilter::new("off")
+        };
+
         let stdout_layer = fmt::layer()
             .with_writer(io::stdout)
-            .with_filter(filter.clone());
+            .with_filter(stdout_filter);
         let file_layer = fmt::layer().with_writer(non_blocking).with_filter(filter);
 
         tracing_subscriber::registry()
@@ -112,6 +105,10 @@ impl LogConfig {
             .with(file_layer)
             .init();
 
-        info!("日志功能已启用，等级: {:?}", self.level);
+        if enable_stdout {
+            info!("日志功能已启用（stdout + file），等级: {:?}", self.level);
+        } else {
+            info!("日志功能已启用（仅文件），等级: {:?}", self.level);
+        }
     }
 }

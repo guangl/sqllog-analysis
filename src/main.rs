@@ -1,35 +1,23 @@
 mod analysis_log;
+mod app;
 
 use analysis_log::LogConfig;
 use anyhow::Result;
-use log::{error, info, trace};
-use sqllog_analysis::{
-    input_path::get_sqllog_dir,
-    process::{process_sqllog_dir, write_error_files},
-};
-use std::env;
+use sqllog_analysis::config::Config;
 
 fn main() -> Result<()> {
-    // 日志参数解析与初始化
-    let log_config = LogConfig::from_args(env::args().skip(1));
+    // 从配置读取是否需要在 stdout 输出日志（用于 release 下根据配置决定）
+    let cfg = Config::load();
+    let runtime = cfg.resolve_runtime();
+
+    // 初始化日志
+    let mut log_config = LogConfig::default();
+    log_config.enable_stdout = Some(runtime.enable_stdout);
+    if let Some(dir) = runtime.log_dir {
+        log_config.log_file = Some(dir);
+    }
     log_config.init();
 
-    trace!("开始获取 sqllog 目录");
-    let dir = get_sqllog_dir();
-    trace!("获取到 sqllog 目录: {}", dir.display());
-    if !dir.exists() {
-        error!("目录不存在: {}", env::current_dir()?.display());
-        return Ok(());
-    }
-    trace!("开始处理目录: {}", dir.display());
-    let (total_files, total_logs, error_files, elapsed) = process_sqllog_dir(&dir)?;
-    info!(
-        "解析完成，共处理 {} 个文件，成功解析 {} 条日志，失败解析 {} 条日志，总耗时: {:.2?}",
-        total_files,
-        total_logs,
-        error_files.len(),
-        elapsed
-    );
-    write_error_files(&error_files)?;
-    Ok(())
+    // 将实际工作委托给 app 模块
+    app::run()
 }

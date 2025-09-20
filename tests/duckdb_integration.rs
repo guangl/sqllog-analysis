@@ -1,15 +1,12 @@
 use duckdb::Connection;
 use sqllog_analysis::duckdb_writer;
 use sqllog_analysis::sqllog::Sqllog;
-use std::env;
+// no runtime env usage; tests should use internal helpers when injection is needed
 use tempfile::tempdir;
 
 #[test]
 fn test_write_and_index_duckdb() {
-    // Ensure indexes will be created for this test
-    unsafe {
-        env::set_var("SQLOG_CREATE_INDEXES", "1");
-    }
+    // Default behavior creates indexes; no env injection required.
 
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("test_sqllogs.duckdb");

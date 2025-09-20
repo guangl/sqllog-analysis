@@ -74,6 +74,30 @@ pub fn process_sqllog_dir<P: AsRef<Path>>(
     Ok((total_files, total_logs, error_files, global_elapsed))
 }
 
+/// Parse a single sqllog file and return parsed records and formatted errors.
+///
+/// Returns (Vec<Sqllog>, Vec<(file_name, formatted_error)>)
+pub fn parse_sqllog_file<P: AsRef<Path>>(path: P) -> (Vec<Sqllog>, Vec<(String, String)>) {
+    let path_ref = path.as_ref();
+    let file_name = path_ref
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let (logs, errors) = crate::sqllog::Sqllog::from_file_with_errors(path_ref);
+
+    let mut formatted = Vec::new();
+    for (line, content, err) in errors {
+        formatted.push((
+            file_name.clone(),
+            format!("行{line}: {err}\n内容: {content}"),
+        ));
+    }
+
+    (logs, formatted)
+}
+
 /// 将所有解析失败的文件及错误详情写入 `error_files.txt`。
 ///
 /// # 参数

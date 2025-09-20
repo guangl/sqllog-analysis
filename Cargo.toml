@@ -31,12 +31,22 @@ tracing-appender = "0.2"
 # flexi_logger removed in favor of env_logger to reduce transitive windows-* versions
 chrono = "0.4"
 duckdb = { version = "1.4.0", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.7"
+dirs = "4"
 
 [dev-dependencies]
 criterion = "0.7"
 regex = "1.11"
 lazy_static = "1.5"
 chrono = "0.4"
+
+[features]
+# Optional feature to expose test helpers (e.g. set_inject_bad_index) for
+# CI/dev debugging and integration tests. Disabled by default so production
+# builds don't export testing APIs unintentionally.
+test-helpers = []
 
 [[bench]]
 name = "datetime_benchmark"

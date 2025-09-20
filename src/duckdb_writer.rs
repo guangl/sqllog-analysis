@@ -2,8 +2,9 @@ use crate::sqllog::Sqllog;
 use anyhow::{Context, Result};
 use duckdb::{Connection, ToSql, appender_params_from_iter, params};
 use log::{debug, info, warn};
-use std::env;
+use serde::Serialize;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 // Type alias placed at module level to avoid declaring items after statements
@@ -26,6 +27,19 @@ type AppenderRow = (
     Option<i64>,
 );
 
+// Test-only injection flag. Tests can toggle this via the `set_inject_bad_index` helper.
+static INJECT_BAD_INDEX: AtomicBool = AtomicBool::new(false);
+
+/// Test helper: toggle injection of a bad index statement.
+///
+/// This is intentionally public so integration tests under `tests/` can
+/// enable failure-injection without using environment variables.
+#[doc(hidden)]
+#[cfg(any(test, feature = "test-helpers"))]
+pub fn set_inject_bad_index(enabled: bool) {
+    INJECT_BAD_INDEX.store(enabled, Ordering::SeqCst);
+}
+
 // No helper needed: `Sqllog` stores i64 fields now.
 
 /// Default entry: uses chunk size `1000`.
@@ -33,7 +47,7 @@ type AppenderRow = (
 /// # Errors
 /// Returns an error if opening the database, creating the table, or writing fails.
 pub fn write_sqllogs_to_duckdb<P: AsRef<Path>>(db_path: P, records: &[Sqllog]) -> Result<()> {
-    // default behavior: use chunk 1000, env var controls index creation
+    // default behavior: use chunk 1000, index creation controlled by caller/configuration
     write_sqllogs_to_duckdb_impl(db_path, records, 1000, None).map(|_| ())
 }
 
@@ -48,7 +62,7 @@ pub fn write_sqllogs_to_duckdb_with_chunk<P: AsRef<Path>>(
     records: &[Sqllog],
     chunk_size: usize,
 ) -> Result<()> {
-    // default: honor environment variable if set
+    // default: index creation controlled by caller/configuration
     write_sqllogs_to_duckdb_impl(db_path, records, chunk_size, None).map(|_| ())
 }
 
@@ -58,7 +72,7 @@ pub fn write_sqllogs_to_duckdb_with_chunk<P: AsRef<Path>>(
 /// Returns an error if opening the database, creating the table, appender usage,
 /// or index creation fails.
 /// Reports the result of attempting to create an index.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct IndexReport {
     /// The CREATE INDEX statement executed.
     pub statement: String,
@@ -84,9 +98,94 @@ pub fn write_sqllogs_to_duckdb_with_chunk_and_report<P: AsRef<Path>>(
     )
 }
 
+/// Append a slice of `Sqllog` records to an existing DuckDB database/table using Appender.
+/// This function will ensure the `sqllogs` table exists, but will NOT create indexes.
+/// It's intended for streaming/partial writes where index creation is handled separately.
+pub fn append_sqllogs_chunk<P: AsRef<Path>>(db_path: P, records: &[Sqllog]) -> Result<()> {
+    let mut conn = Connection::open(db_path.as_ref()).with_context(|| {
+        format!(
+            "failed to open duckdb database {}",
+            db_path.as_ref().display()
+        )
+    })?;
+
+    // Ensure table exists (idempotent)
+    let create_sql = r"CREATE TABLE IF NOT EXISTS sqllogs (
+        occurrence_time TEXT NOT NULL,
+        ep INTEGER NOT NULL,
+        session TEXT,
+        thread TEXT,
+        user TEXT,
+        trx_id TEXT,
+        statement TEXT,
+        appname TEXT,
+        ip TEXT,
+        sql_type TEXT,
+        description TEXT NOT NULL,
+        execute_time BIGINT,
+        rowcount BIGINT,
+        execute_id BIGINT
+    )";
+
+    conn.execute(create_sql, params![])?;
+
+    let tx = conn.transaction()?;
+    let mut app = tx.appender("sqllogs")?;
+
+    for r in records {
+        let execute_time_i = r.execute_time;
+        let rowcount_i = r.rowcount;
+        let execute_id_i = r.execute_id;
+
+        let row = (
+            r.occurrence_time.clone(),
+            r.ep,
+            r.session.clone(),
+            r.thread.clone(),
+            r.user.clone(),
+            r.trx_id.clone(),
+            r.statement.clone(),
+            r.appname.clone(),
+            r.ip.clone(),
+            r.sql_type.clone(),
+            r.description.clone(),
+            execute_time_i,
+            rowcount_i,
+            execute_id_i,
+        );
+
+        let rows = std::iter::once(row).map(|t| {
+            appender_params_from_iter(vec![
+                Box::new(t.0) as Box<dyn ToSql>,
+                Box::new(t.1) as Box<dyn ToSql>,
+                Box::new(t.2) as Box<dyn ToSql>,
+                Box::new(t.3) as Box<dyn ToSql>,
+                Box::new(t.4) as Box<dyn ToSql>,
+                Box::new(t.5) as Box<dyn ToSql>,
+                Box::new(t.6) as Box<dyn ToSql>,
+                Box::new(t.7) as Box<dyn ToSql>,
+                Box::new(t.8) as Box<dyn ToSql>,
+                Box::new(t.9) as Box<dyn ToSql>,
+                Box::new(t.10) as Box<dyn ToSql>,
+                Box::new(t.11) as Box<dyn ToSql>,
+                Box::new(t.12) as Box<dyn ToSql>,
+                Box::new(t.13) as Box<dyn ToSql>,
+            ])
+        });
+
+        app.append_rows(rows)?;
+    }
+
+    app.flush()?;
+    drop(app);
+    tx.commit()?;
+
+    Ok(())
+}
+
 // Core implementation shared by public wrappers. If `create_indexes_override` is
-// Some(true/false) it overrides the environment variable; if None the env var
-// SQLOG_CREATE_INDEXES determines behavior (default true).
+// Some(true/false) it overrides the caller/configuration; if None the default
+// behavior is to create indexes (default true).
 #[allow(clippy::too_many_lines)]
 fn write_sqllogs_to_duckdb_impl<P: AsRef<Path>>(
     db_path: P,
@@ -209,7 +308,7 @@ fn write_sqllogs_to_duckdb_impl<P: AsRef<Path>>(
     // its own short-lived transaction so a failing index creation doesn't leave
     // the database in a partial state and so we can capture per-index errors.
     // build the list of index statements; allow test injection of a bad
-    // statement via SQLOG_INJECT_BAD_INDEX to exercise failure handling.
+    // statement via the test helper (set_inject_bad_index) to exercise failure handling.
     let mut index_statements: Vec<String> = vec![
         "CREATE INDEX IF NOT EXISTS idx_sqllogs_trx_id ON sqllogs(trx_id)".to_string(),
         "CREATE INDEX IF NOT EXISTS idx_sqllogs_thread ON sqllogs(thread)".to_string(),
@@ -217,31 +316,22 @@ fn write_sqllogs_to_duckdb_impl<P: AsRef<Path>>(
         "CREATE INDEX IF NOT EXISTS idx_sqllogs_ip ON sqllogs(ip)".to_string(),
     ];
 
-    if env::var("SQLOG_INJECT_BAD_INDEX").is_ok() {
+    if INJECT_BAD_INDEX.load(Ordering::SeqCst) {
         // inject a statement that should fail (nonexistent column) to test
-        // error reporting. Tests can set SQLOG_INJECT_BAD_INDEX=1 temporarily.
         index_statements
             .push("CREATE INDEX idx_sqllogs_bad ON sqllogs(nonexistent_column)".to_string());
     }
 
     // decide whether to create indexes:
-    let create_indexes = create_indexes_override.map_or_else(
-        || {
-            env::var("SQLOG_CREATE_INDEXES")
-                .map(|v| v != "0")
-                .unwrap_or(true)
-        },
-        |b| b,
-    );
+    let create_indexes = create_indexes_override.unwrap_or(true);
 
     if !create_indexes {
-        info!("SQLOG_CREATE_INDEXES=0 -> skipping index creation");
+        info!("skipping index creation (disabled by configuration)");
         return Ok(None);
     }
 
-    // log level for index creation messages (info or debug). Default: info.
-    let index_log_level = env::var("SQLOG_INDEX_LOG_LEVEL").unwrap_or_else(|_| "info".into());
-    let use_debug = index_log_level.eq_ignore_ascii_case("debug");
+    // Decide whether to print debug information based on the logging framework level.
+    let use_debug = log::log_enabled!(log::Level::Debug);
 
     let mut reports: Vec<IndexReport> = Vec::with_capacity(index_statements.len());
     for stmt in index_statements {
