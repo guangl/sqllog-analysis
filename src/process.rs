@@ -3,9 +3,12 @@
 use crate::sqllog::Sqllog;
 use anyhow::Result;
 use log::{info, trace};
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::Path;
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::Path,
+    time,
+};
 
 /// 扫描指定目录，解析所有 dmsql*.log 文件。
 ///
@@ -28,14 +31,14 @@ use std::path::Path;
 /// - 解析进度和耗时通过 println 输出
 pub fn process_sqllog_dir<P: AsRef<Path>>(
     dir: P,
-) -> Result<(usize, usize, Vec<(String, String)>, std::time::Duration)> {
+) -> Result<(usize, usize, Vec<(String, String)>, time::Duration)> {
     let mut total_files = 0;
     let mut total_logs = 0;
     let mut error_files = Vec::new();
-    use std::time::Instant;
+    use time::Instant;
     let global_start = Instant::now();
     // 遍历目录下所有文件
-    for entry in std::fs::read_dir(&dir)? {
+    for entry in fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
         // 跳过非文件（如文件夹）
@@ -45,7 +48,7 @@ pub fn process_sqllog_dir<P: AsRef<Path>>(
         // 仅处理 dmsql*.log 文件
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             if name.starts_with("dmsql")
-                && std::path::Path::new(name)
+                && Path::new(name)
                     .extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("log"))
             {

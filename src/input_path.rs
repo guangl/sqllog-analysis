@@ -1,7 +1,9 @@
 use log::{info, trace};
-use std::env;
-use std::io::{self, Write};
-use std::path::PathBuf;
+use std::{
+    env,
+    io::{self, Write},
+    path::PathBuf,
+};
 
 /// 获取 sqllog 文件夹路径，优先命令行参数，否则交互输入。
 ///

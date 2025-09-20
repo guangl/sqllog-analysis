@@ -1,15 +1,20 @@
 use sqllog_analysis::process::{process_sqllog_dir, write_error_files};
-use std::fs::{self, File};
-use std::io::Write;
+use std::{
+    env,
+    fs::{self, File},
+    io::Write,
+    panic,
+    path::PathBuf,
+};
 use tempfile::tempdir;
 
 #[test]
 fn test_main_dir_not_exist() {
-    let dir = std::path::PathBuf::from("not_exist_dir_for_test");
+    let dir = PathBuf::from("not_exist_dir_for_test");
     assert!(!dir.exists());
-    let result = std::panic::catch_unwind(|| {
+    let result = panic::catch_unwind(|| {
         if !dir.exists() {
-            println!("目录不存在: {:?}", std::env::current_dir().unwrap());
+            println!("目录不存在: {:?}", env::current_dir().unwrap());
         }
     });
     assert!(result.is_ok());
@@ -27,14 +32,14 @@ fn test_main_with_error_files() {
     assert!(!error_files.is_empty());
     let result = write_error_files(&error_files);
     assert!(result.is_ok());
-    let content = std::fs::read_to_string("error_files.txt").unwrap();
+    let content = fs::read_to_string("error_files.txt").unwrap();
     assert!(content.contains("dmsql_test.log"));
 }
 
 #[test]
 fn test_main_no_log_files() {
     let dir = tempdir().unwrap();
-    let result = std::panic::catch_unwind(|| {
+    let result = panic::catch_unwind(|| {
         for entry in fs::read_dir(dir.path()).unwrap() {
             let path = entry.unwrap().path();
             if path.is_file() {

@@ -1,6 +1,10 @@
+use fs::OpenOptions;
 use sqllog_analysis::process::{process_sqllog_dir, write_error_files};
-use std::fs::File;
-use std::io::Write;
+use std::{
+    env,
+    fs::{self, File},
+    io::Write,
+};
 use tempfile::tempdir;
 
 #[test]
@@ -64,7 +68,7 @@ fn test_write_error_files_non_empty() {
     ];
     let result = write_error_files(&errors);
     assert!(result.is_ok());
-    let content = std::fs::read_to_string("error_files.txt").unwrap();
+    let content = fs::read_to_string("error_files.txt").unwrap();
     assert!(content.contains("file1.log"));
     assert!(content.contains("file2.log"));
 }
@@ -79,7 +83,6 @@ fn test_write_error_files_empty() {
 #[test]
 fn test_write_error_files_io_error() {
     // 模拟无法写入 error_files.txt（只读文件权限）
-    use std::fs::{OpenOptions, set_permissions};
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("error_files.txt");
     let _file = OpenOptions::new()
@@ -88,21 +91,21 @@ fn test_write_error_files_io_error() {
         .open(&file_path)
         .unwrap();
     // 设置只读权限（跨平台）
-    let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
+    let mut perms = fs::metadata(&file_path).unwrap().permissions();
     perms.set_readonly(true);
-    set_permissions(&file_path, perms).unwrap();
+    fs::set_permissions(&file_path, perms).unwrap();
     let errors = vec![(
         "file1.log".to_string(),
         "行1: 错误内容\n内容: bad".to_string(),
     )];
     // 将当前目录切换到临时目录
-    let old_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
+    let old_dir = env::current_dir().unwrap();
+    env::set_current_dir(dir.path()).unwrap();
     let result = write_error_files(&errors);
     // 由于 error_files.txt 只读，写入应报错
     assert!(result.is_err());
     // 切回原目录
-    std::env::set_current_dir(old_dir).unwrap();
+    env::set_current_dir(old_dir).unwrap();
 }
 
 #[test]

@@ -30,6 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"
 # flexi_logger removed in favor of env_logger to reduce transitive windows-* versions
 chrono = "0.4"
+duckdb = { version = "1.4.0", features = ["bundled"] }
 
 [dev-dependencies]
 criterion = "0.7"

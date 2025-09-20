@@ -1,7 +1,9 @@
 #![allow(invalid_from_utf8)]
 use sqllog_analysis::sqllog::*;
-use std::fs::File;
-use std::io::Write;
+use std::{
+    fs::File,
+    io::{self, Write},
+};
 use tempfile::tempdir;
 
 #[test]
@@ -192,7 +194,7 @@ fn test_multiline_description() {
 "#;
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test_multiline.log");
-    let mut file = std::fs::File::create(&file_path).unwrap();
+    let mut file = File::create(&file_path).unwrap();
     writeln!(file, "{test_log}").unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
     assert_eq!(logs.len(), 4);
@@ -238,7 +240,6 @@ fn test_is_first_row_extreme_cases() {
 
 #[test]
 fn test_sqllogerror_display_all() {
-    use std::io;
     // 无需 FromUtf8Error，直接用 Utf8Error
     use regex::Error as RegexError;
     let io_err = SqllogError::Io(io::Error::new(io::ErrorKind::Other, "ioerr"));
@@ -399,7 +400,7 @@ fn test_from_file_with_errors_segment_none() {
     // segment_buf 非空但 from_line 返回 Ok(None)
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("segment_none.log");
-    let mut file = std::fs::File::create(&file_path).unwrap();
+    let mut file = File::create(&file_path).unwrap();
     // 构造一段无法被正则解析但非空的内容
     writeln!(file, "2025-10-10 10:10:10.100 (EP[1] sess:NULL thrd:NULL user:NULL trxid:NULL stmt:NULL) bad desc").unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
@@ -457,7 +458,7 @@ fn test_from_file_with_errors_has_first_row_false() {
     // 文件无有效首行
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("invalid.log");
-    let mut file = std::fs::File::create(&file_path).unwrap();
+    let mut file = File::create(&file_path).unwrap();
     writeln!(file, "not a valid log").unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
     assert!(logs.is_empty());
@@ -479,7 +480,7 @@ fn test_from_file_with_errors_utf8_error() {
     // 文件内容为非法 UTF8
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("utf8_error.log");
-    let mut file = std::fs::File::create(&file_path).unwrap();
+    let mut file = File::create(&file_path).unwrap();
     file.write_all(&[0xff, 0xfe, 0xfd]).unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
     assert!(logs.is_empty());
@@ -492,7 +493,7 @@ fn test_from_file_with_errors_last_segment_error() {
     // 最后一段为非法内容，实际会被合并到 description
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("last_error.log");
-    let mut file = std::fs::File::create(&file_path).unwrap();
+    let mut file = File::create(&file_path).unwrap();
     writeln!(file, "2025-10-10 10:10:10.100 (EP[1] sess:0x1234 thrd:1234 user:SYSDBA trxid:5678 stmt:0xabcd) [SEL]: SELECT 1").unwrap();
     writeln!(file, "bad last segment").unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
@@ -522,7 +523,7 @@ fn test_from_file_with_errors_only_spaces() {
     // 文件内容仅包含空格和空行
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("only_spaces.log");
-    let mut file = std::fs::File::create(&file_path).unwrap();
+    let mut file = File::create(&file_path).unwrap();
     writeln!(file, "   ").unwrap();
     writeln!(file, "\t\t").unwrap();
     writeln!(file).unwrap();
@@ -538,7 +539,7 @@ fn test_from_file_with_errors_segment_buf_unparsable() {
     // segment_buf 非空但内容不可解析，主逻辑不会报错
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("unparsable_segment.log");
-    let mut file = std::fs::File::create(&file_path).unwrap();
+    let mut file = File::create(&file_path).unwrap();
     writeln!(file, "2025-10-10 10:10:10.100 (EP[1] sess:NULL thrd:NULL user:NULL trxid:NULL stmt:NULL) bad desc").unwrap();
     writeln!(file, "not a valid log").unwrap();
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
