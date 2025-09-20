@@ -1,26 +1,28 @@
+use core::num;
 use lazy_static::lazy_static; // 用于静态正则表达式
 use log::{error, info, trace};
 use memchr::memchr; // 高效查找字节分隔符
-use regex::Regex; // 正则表达式解析日志
-use std::path::Path; // 文件路径处理
+use regex::Regex;
+// 正则表达式解析日志
+use std::{fs, io, path::Path, result, str}; // 文件路径处理
 use thiserror::Error; // 错误类型派生
 
 /// 通用结果类型，统一错误处理
-pub type SResult<T> = std::result::Result<T, SqllogError>;
+pub type SResult<T> = result::Result<T, SqllogError>;
 
 // 简短类型别名，表示 description 中解析出的三个可选数字
-type DescNumbers = (Option<u64>, Option<u64>, Option<u64>);
+type DescNumbers = (Option<i64>, Option<i64>, Option<i64>);
 
 /// 日志解析相关错误类型
 #[derive(Error, Debug)]
 pub enum SqllogError {
     /// IO 错误（文件读写）
     #[error("IO错误: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
 
     /// UTF8 解码错误
     #[error("UTF8解码错误: {0}")]
-    Utf8(#[from] std::str::Utf8Error),
+    Utf8(#[from] str::Utf8Error),
 
     /// 正则表达式解析错误
     #[error("正则解析错误: {0}")]
@@ -28,7 +30,7 @@ pub enum SqllogError {
 
     /// 字段解析错误（数字等）
     #[error("字段解析错误: {0}")]
-    ParseInt(#[from] std::num::ParseIntError),
+    ParseInt(#[from] num::ParseIntError),
 
     /// 日志格式错误，包含行号和内容
     #[error("日志格式错误: 行{line}: {content}")]
@@ -68,11 +70,11 @@ pub struct Sqllog {
     /// 语句描述（原始文本）
     pub description: String,
     /// 执行时间（毫秒）
-    pub execute_time: Option<u64>,
+    pub execute_time: Option<i64>,
     /// 影响行数
-    pub rowcount: Option<u64>,
+    pub rowcount: Option<i64>,
     /// 执行 ID
-    pub execute_id: Option<u64>,
+    pub execute_id: Option<i64>,
 }
 
 impl Sqllog {
@@ -226,7 +228,7 @@ impl Sqllog {
                     content: desc.to_string(),
                 })?
                 .as_str()
-                .parse()
+                .parse::<i64>()
                 .map_err(|_| SqllogError::Format {
                     line: line_num,
                     content: desc.to_string(),
@@ -238,7 +240,7 @@ impl Sqllog {
                     content: desc.to_string(),
                 })?
                 .as_str()
-                .parse()
+                .parse::<i64>()
                 .map_err(|_| SqllogError::Format {
                     line: line_num,
                     content: desc.to_string(),
@@ -250,7 +252,7 @@ impl Sqllog {
                     content: desc.to_string(),
                 })?
                 .as_str()
-                .parse()
+                .parse::<i64>()
                 .map_err(|_| SqllogError::Format {
                     line: line_num,
                     content: desc.to_string(),
@@ -326,7 +328,7 @@ impl Sqllog {
     pub fn from_file_with_errors<P: AsRef<Path>>(
         path: P,
     ) -> (Vec<Self>, Vec<(usize, String, SqllogError)>) {
-        let data = match std::fs::read(path.as_ref()) {
+        let data = match fs::read(path.as_ref()) {
             Ok(d) => d,
             Err(e) => {
                 error!("文件读取失败: {}, 错误: {}", path.as_ref().display(), e);
@@ -454,7 +456,7 @@ impl Sqllog {
         line_num: usize,
         errors: &mut Vec<(usize, String, SqllogError)>,
     ) -> String {
-        match std::str::from_utf8(line_bytes) {
+        match str::from_utf8(line_bytes) {
             Ok(s) => s.to_string(),
             Err(e) => {
                 errors.push((line_num, format!("{line_bytes:?}"), SqllogError::Utf8(e)));
@@ -510,15 +512,20 @@ impl Sqllog {
     /// * `total` - 文件总字节数
     /// * `last_percent` - 上次打印的进度百分比
     pub fn print_progress(current: usize, total: usize, last_percent: &mut u8) {
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            clippy::cast_precision_loss
-        )]
-        let percent = ((current as f64 / total as f64) * 100.0) as u8;
-        if percent >= *last_percent + 5 {
+        // Use integer arithmetic to avoid floating point casts which can lose precision
+        // and trigger clippy pedantic warnings. We compute percentage in basis points
+        // and then divide to get integer percent value.
+        if total == 0 {
+            return;
+        }
+        let current_u128 = current as u128;
+        let total_u128 = total as u128;
+        let percent_u128 = (current_u128.saturating_mul(100u128)) / total_u128;
+        // Convert to u8 safely; if value is out of range, clamp to 100%.
+        let percent = u8::try_from(percent_u128).unwrap_or(100u8);
+        if percent >= last_percent.saturating_add(5) {
             print!("\r处理进度: {percent}% ");
-            std::io::Write::flush(&mut std::io::stdout()).ok();
+            io::Write::flush(&mut io::stdout()).ok();
             *last_percent = percent;
         }
     }

@@ -5,12 +5,10 @@
 
 use chrono::Local;
 use log::LevelFilter;
+use std::{env, fs, fs::OpenOptions, io, path::PathBuf};
 use tracing::info;
-use std::fs::OpenOptions;
-use std::path::PathBuf;
-use tracing_appender::non_blocking;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_appender::non_blocking::NonBlocking;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// 日志配置参数
 pub struct LogConfig {
@@ -62,7 +60,7 @@ impl LogConfig {
         // 默认：如果没有传入 --log-file，则使用当前工作目录下的 `logs` 目录
         let dir = self.log_file.as_ref().map_or_else(
             || {
-                let mut p = match std::env::current_dir() {
+                let mut p = match env::current_dir() {
                     Ok(p) => p,
                     Err(e) => {
                         eprintln!("无法获取当前工作目录，使用 '.' 作为基准: {e}");
@@ -71,7 +69,7 @@ impl LogConfig {
                 };
                 p.push("logs");
                 // 如果目录不存在，尝试创建
-                if let Err(e) = std::fs::create_dir_all(&p) {
+                if let Err(e) = fs::create_dir_all(&p) {
                     let p_display = p.display();
                     eprintln!("无法创建日志目录 {p_display}: {e}");
                 }
@@ -86,7 +84,11 @@ impl LogConfig {
         let file_path = dir.join(filename);
 
         // 打开（创建并追加）文件
-        let file = match OpenOptions::new().create(true).append(true).open(&file_path) {
+        let file = match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&file_path)
+        {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("无法创建日志文件 {}: {e}", file_path.display());
@@ -94,14 +96,14 @@ impl LogConfig {
             }
         };
 
-        let (non_blocking, guard) = non_blocking::NonBlocking::new(file);
+        let (non_blocking, guard) = NonBlocking::new(file);
         // 将 guard 泄漏为静态引用以保证其在程序生命周期内存活，从而
         // 可以安全地使用 non_blocking writer（简洁且比 std::mem::forget 更明确）。
         let _guard_ref: &'static _ = Box::leak(Box::new(guard));
 
         // 创建两个输出层：stdout 层与文件层，注册到全局 subscriber
         let stdout_layer = fmt::layer()
-            .with_writer(std::io::stdout)
+            .with_writer(io::stdout)
             .with_filter(filter.clone());
         let file_layer = fmt::layer().with_writer(non_blocking).with_filter(filter);
 

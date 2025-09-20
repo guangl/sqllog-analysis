@@ -1,6 +1,7 @@
 #![allow(clippy::uninlined_format_args)]
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::io::Write;
+use sqllog_analysis::sqllog::Sqllog;
+use std::{fs::File, io::Write};
 
 fn bench_sqllog_from_file_1m(c: &mut Criterion) {
     // 构造 100 万条日志，每条 description 多行
@@ -13,11 +14,11 @@ fn bench_sqllog_from_file_1m(c: &mut Criterion) {
     }
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("bench_1m.log");
-    let mut file = std::fs::File::create(&file_path).unwrap();
+    let mut file = File::create(&file_path).unwrap();
     file.write_all(log_content.as_bytes()).unwrap();
     c.bench_function("sqllog_from_file_1m", |b| {
         b.iter(|| {
-            let (logs, errors) = sqllog_analysis::sqllog::Sqllog::from_file_with_errors(&file_path);
+            let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
             assert_eq!(logs.len(), 1_000_000);
             assert!(errors.is_empty());
         })
