@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.2.0] - 2025-09-20
+## [v0.2.1] - 2025-09-20
 ### Added
 - DuckDB appender-based bulk writer for `Sqllog` records with configurable chunk size.
 - `IndexReport` to capture per-index creation timing and errors.
@@ -18,4 +18,4 @@ All notable changes to this project will be documented in this file.
 - Addressed clippy pedantic warnings and other small refactors.
 
 
-[Unreleased]: https://github.com/guangl/sqllog-analysis/compare/v0.1.0...v0.2.0
+[v0.2.1]: https://github.com/guangl/sqllog-analysis/releases/tag/v0.2.1
