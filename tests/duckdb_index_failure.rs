@@ -1,3 +1,5 @@
+#![cfg(feature = "test-helpers")]
+
 use sqllog_analysis::duckdb_writer;
 use sqllog_analysis::sqllog::Sqllog;
 use tempfile::tempdir;

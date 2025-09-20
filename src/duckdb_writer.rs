@@ -35,6 +35,7 @@ static INJECT_BAD_INDEX: AtomicBool = AtomicBool::new(false);
 /// This is intentionally public so integration tests under `tests/` can
 /// enable failure-injection without using environment variables.
 #[doc(hidden)]
+#[cfg(any(test, feature = "test-helpers"))]
 pub fn set_inject_bad_index(enabled: bool) {
     INJECT_BAD_INDEX.store(enabled, Ordering::SeqCst);
 }

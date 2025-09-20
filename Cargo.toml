@@ -42,6 +42,12 @@ regex = "1.11"
 lazy_static = "1.5"
 chrono = "0.4"
 
+[features]
+# Optional feature to expose test helpers (e.g. set_inject_bad_index) for
+# CI/dev debugging and integration tests. Disabled by default so production
+# builds don't export testing APIs unintentionally.
+test-helpers = []
+
 [[bench]]
 name = "datetime_benchmark"
 harness = false
