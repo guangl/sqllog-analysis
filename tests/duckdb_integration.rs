@@ -47,7 +47,7 @@ fn test_write_and_index_duckdb() {
     ];
 
     // write to DB (索引功能已移除，测试仅验证写入与查询结果)
-    duckdb_writer::write_sqllogs_to_duckdb(&db_path, &records)
+    duckdb_writer::write_sqllogs_to_duckdb(&db_path, &records, false)
         .expect("write should succeed");
 
     // open DB and verify rows

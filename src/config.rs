@@ -18,6 +18,9 @@ pub struct LogSection {
 #[derive(Debug, Deserialize)]
 pub struct DatabaseSection {
     pub db_path: Option<String>,
+    // 当为 true 时，在内存 DuckDB 中写入后再将表导出到磁盘（COPY TO），
+    // 默认为 false，保持现有直接写入磁盘数据库的行为。
+    pub use_in_memory: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +64,7 @@ pub struct RuntimeConfig {
     pub export_format: String,
     pub export_out_path: Option<PathBuf>,
     pub export_options: ExportOptions,
+    pub use_in_memory: bool,
 }
 
 impl Config {
@@ -122,6 +126,12 @@ impl Config {
             .and_then(|d| d.db_path.clone())
             .unwrap_or_else(|| "sqllogs.duckdb".into());
 
+        let use_in_memory = cfg
+            .database
+            .as_ref()
+            .and_then(|d| d.use_in_memory)
+            .unwrap_or(false);
+
         let enable_stdout = cfg
             .log
             .as_ref()
@@ -155,8 +165,18 @@ impl Config {
             cfg.export.as_ref().and_then(|e| e.overwrite).unwrap_or(false);
         let export_append =
             cfg.export.as_ref().and_then(|e| e.append).unwrap_or(false);
-        let export_file_size_bytes =
-            cfg.export.as_ref().and_then(|e| e.file_size_bytes);
+        let export_file_size_bytes = cfg
+            .export
+            .as_ref()
+            .and_then(|e| e.file_size_bytes)
+            .map(|v| {
+                if v == 0 {
+                    // Treat 0 as a config error. Print a clear message and exit with code 2
+                    eprintln!("配置错误: export.file_size_bytes 不能为 0；请设置为正整数或删除该项以表示无上限");
+                    std::process::exit(2);
+                }
+                v
+            });
 
         let export_options = ExportOptions {
             per_thread_out: export_per_thread_out,
@@ -183,6 +203,7 @@ impl Config {
             export_format,
             export_out_path,
             export_options,
+            use_in_memory,
         }
     }
 }

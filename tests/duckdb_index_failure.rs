@@ -24,6 +24,6 @@ fn test_index_creation_failure_reports_error() {
         execute_id: Some(100),
     }];
 
-    duckdb_writer::write_sqllogs_to_duckdb(&db_path, &records)
+    duckdb_writer::write_sqllogs_to_duckdb(&db_path, &records, false)
         .expect("write should succeed");
 }
