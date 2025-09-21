@@ -21,3 +21,9 @@ append = false
 [sqllog]
 sqllog_dir = "sqllog"
 chunk_size = 1000
+# 解析器线程数量（默认：10）
+parser_threads = 10
+# 是否写入解析错误到文件
+write_errors = true
+# 错误输出文件路径
+errors_out_path = "parse_errors.jsonl"

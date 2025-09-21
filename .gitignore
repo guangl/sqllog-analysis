@@ -4,3 +4,8 @@ report/*
 error_files.txt
 logs/*
 out.*
+*.duckdb*
+*.csv
+*.jsonl
+parse_errors.*
+/exports/
