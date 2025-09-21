@@ -190,7 +190,7 @@ errors_out_path = "parse_errors.jsonl"   - 数据库连接会正确关闭
 
 - ✅ DuckDB 依赖和配置已添加```
 
-- ✅ 数据库路径配置已实现  
+- ✅ 数据库路径配置已实现
 
 - ❌ **实际的数据库连接和数据插入功能尚未实现**## TODO
 
@@ -254,7 +254,7 @@ cargo bench --bench sqllog_bench
 
 本项目使用 `tracing` / `tracing-subscriber` 进行日志记录。
 
-# 运行日期时间解析性能基准  
+# 运行日期时间解析性能基准
 
 cargo bench --bench datetime_bench- 默认会把日志写入当前工作目录下的 `logs/` 目录（若目录不存在会尝试创建）。
 
