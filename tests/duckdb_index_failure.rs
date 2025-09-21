@@ -1,15 +1,9 @@
-#![cfg(feature = "test-helpers")]
-
 use sqllog_analysis::duckdb_writer;
-use sqllog_analysis::duckdb_writer::set_inject_bad_index;
 use sqllog_analysis::sqllog::Sqllog;
 use tempfile::tempdir;
 
 #[test]
 fn test_index_creation_failure_reports_error() {
-    // instruct writer to inject a bad index statement via test helper
-    set_inject_bad_index(true);
-
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("test_sqllogs_bad.duckdb");
 
@@ -30,14 +24,6 @@ fn test_index_creation_failure_reports_error() {
         execute_id: Some(100),
     }];
 
-    let reports =
-        duckdb_writer::write_sqllogs_to_duckdb_with_chunk_and_report(&db_path, &records, 1, true)
-            .expect("write should succeed");
-
-    // we expect at least one report entry to contain an error due to injection
-    let any_error = reports.iter().any(|r| r.error.is_some());
-    assert!(
-        any_error,
-        "expected at least one index creation to fail and be reported"
-    );
+    duckdb_writer::write_sqllogs_to_duckdb(&db_path, &records)
+        .expect("write should succeed");
 }

@@ -38,8 +38,7 @@ fn test_from_file_with_errors_invalid_utf8() {
     // 新实现下，遇到 UTF8 错误会直接跳过该行
     println!("errors: {errors:?}");
     assert!(!errors.is_empty());
-    let found_utf8 = errors
-        .iter()
-        .any(|(_, _, err)| matches!(err, SqllogError::Utf8(_)));
+    let found_utf8 =
+        errors.iter().any(|(_, _, err)| matches!(err, SqllogError::Utf8(_)));
     assert!(found_utf8, "应为 Utf8 错误");
 }

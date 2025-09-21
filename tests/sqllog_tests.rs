@@ -78,16 +78,15 @@ fn test_from_file_invalid_utf8() {
     let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
     assert_eq!(logs.len(), 0);
     assert!(
-        errors
-            .iter()
-            .any(|(_, _, e)| format!("{e}").contains("UTF"))
+        errors.iter().any(|(_, _, e)| format!("{e}").contains("UTF"))
             || !errors.is_empty()
     );
 }
 
 #[test]
+#[allow(clippy::cognitive_complexity, clippy::similar_names)]
 fn test_sqllog_parsing() {
-    let test_log = r#"
+    let test_log = r"
 2025-09-16 20:02:53.562 (EP[0] sess:0x6da8ccef0 thrd:4146217 user:EDM_BASE trxid:122154453026 stmt:0x6da900ef0 appname: ip:::ffff:10.80.147.109) PARAMS(SEQNO, TYPE, DATA)={(0, NUMBER, 1705459), (1, VARCHAR2, 'CS_c768d88f3a07'), (2, VARCHAR2, NULL), (3, NUMBER, 0), (4, VARCHAR2, ''), (5, VARCHAR2, NULL), (6, VARCHAR2, NULL), (7, VARCHAR2, 'other'), (8, VARCHAR2, NULL), (9, VARCHAR2, '5'), (10, NUMBER, 0), (11, VARCHAR2, NULL), (12, VARCHAR2, '无'), (13, TIMESTAMP, 2019-09-01 00:00:00), (14, TIMESTAMP, 2020-01-01 00:00:00), (15, NUMBER, 0), (16, VARCHAR2, NULL), (17, VARCHAR2, NULL), (18, VARCHAR2, NULL), (19, VARCHAR2, '
 1
 1'), (20, VARCHAR2, NULL), (21, TIMESTAMP, 2022-10-24 21:41:38), (22, TIMESTAMP, NULL), (23, TIMESTAMP, NULL), (24, NUMBER, 1), (25, VARCHAR2, NULL), (26, VARCHAR2, NULL), (27, VARCHAR2, NULL), (28, NUMBER, 3), (29, VARCHAR2, NULL), (30, TIMESTAMP, 2025-09-16 20:02:53)}
@@ -100,7 +99,7 @@ fn test_sqllog_parsing() {
 2025-09-16 20:02:53.566 (EP[0] sess:0x6da8ccef0 thrd:4146217 user:EDM_BASE trxid:122154453026 stmt:0x6da900ef0 appname: ip:::ffff:10.80.147.109) PARAMS(SEQNO, TYPE, DATA)={(0, NUMBER, 1705960), (1, VARCHAR2, 'CS_3e936f05cce9'), (2, VARCHAR2, NULL), (3, NUMBER, 0), (4, VARCHAR2, '字节跳动'), (5, VARCHAR2, NULL), (6, VARCHAR2, NULL), (7, VARCHAR2, 'other'), (8, VARCHAR2, NULL), (9, VARCHAR2, '5'), (10, NUMBER, 0), (11, VARCHAR2, NULL), (12, VARCHAR2, '后端开发实习生'), (13, TIMESTAMP, 2022-01-10 00:00:00), (14, TIMESTAMP, 2022-06-30 00:00:00), (15, NUMBER, 0), (16, VARCHAR2, NULL), (17, VARCHAR2, NULL), (18, VARCHAR2, NULL), (19, VARCHAR2, '⚫ 4
 ⚫ 5
 ⚫ 6'), (20, VARCHAR2, NULL), (21, TIMESTAMP, 2022-10-24 23:20:33), (22, TIMESTAMP, NULL), (23, TIMESTAMP, NULL), (24, NUMBER, 1), (25, VARCHAR2, NULL), (26, VARCHAR2, NULL), (27, VARCHAR2, NULL), (28, NUMBER, 3), (29, VARCHAR2, NULL), (30, TIMESTAMP, 2025-09-16 20:02:53)}
-"#;
+";
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.log");
     let mut file = File::create(&file_path).unwrap();
@@ -178,7 +177,7 @@ fn test_is_first_row() {
 
 #[test]
 fn test_multiline_description() {
-    let test_log = r#"
+    let test_log = r"
 2025-09-16 20:02:53.562 (EP[0] sess:0x6da8ccef0 thrd:4146217 user:EDM_BASE trxid:122154453026 stmt:0x6da900ef0 appname: ip:::ffff:10.80.147.109) PARAMS(SEQNO, TYPE, DATA)={(0, NUMBER, 1705459), (1, VARCHAR2, 'CS_c768d88f3a07'), (2, VARCHAR2, NULL), (3, NUMBER, 0), (4, VARCHAR2, ''), (5, VARCHAR2, NULL), (6, VARCHAR2, NULL), (7, VARCHAR2, 'other'), (8, VARCHAR2, NULL), (9, VARCHAR2, '5'), (10, NUMBER, 0), (11, VARCHAR2, NULL), (12, VARCHAR2, '无'), (13, TIMESTAMP, 2019-09-01 00:00:00), (14, TIMESTAMP, 2020-01-01 00:00:00), (15, NUMBER, 0), (16, VARCHAR2, NULL), (17, VARCHAR2, NULL), (18, VARCHAR2, NULL), (19, VARCHAR2, '
 1
 1'), (20, VARCHAR2, NULL), (21, TIMESTAMP, 2022-10-24 21:41:38), (22, TIMESTAMP, NULL), (23, TIMESTAMP, NULL), (24, NUMBER, 1), (25, VARCHAR2, NULL), (26, VARCHAR2, NULL), (27, VARCHAR2, NULL), (28, NUMBER, 3), (29, VARCHAR2, NULL), (30, TIMESTAMP, 2025-09-16 20:02:53)}
@@ -191,7 +190,7 @@ fn test_multiline_description() {
 2025-09-16 20:02:53.566 (EP[0] sess:0x6da8ccef0 thrd:4146217 user:EDM_BASE trxid:122154453026 stmt:0x6da900ef0 appname: ip:::ffff:10.80.147.109) PARAMS(SEQNO, TYPE, DATA)={(0, NUMBER, 1705960), (1, VARCHAR2, 'CS_3e936f05cce9'), (2, VARCHAR2, NULL), (3, NUMBER, 0), (4, VARCHAR2, '字节跳动'), (5, VARCHAR2, NULL), (6, VARCHAR2, NULL), (7, VARCHAR2, 'other'), (8, VARCHAR2, NULL), (9, VARCHAR2, '5'), (10, NUMBER, 0), (11, VARCHAR2, NULL), (12, VARCHAR2, '后端开发实习生'), (13, TIMESTAMP, 2022-01-10 00:00:00), (14, TIMESTAMP, 2022-06-30 00:00:00), (15, NUMBER, 0), (16, VARCHAR2, NULL), (17, VARCHAR2, NULL), (18, VARCHAR2, NULL), (19, VARCHAR2, '⚫ 4
 ⚫ 5
 ⚫ 6'), (20, VARCHAR2, NULL), (21, TIMESTAMP, 2022-10-24 23:20:33), (22, TIMESTAMP, NULL), (23, TIMESTAMP, NULL), (24, NUMBER, 1), (25, VARCHAR2, NULL), (26, VARCHAR2, NULL), (27, VARCHAR2, NULL), (28, NUMBER, 3), (29, VARCHAR2, NULL), (30, TIMESTAMP, 2025-09-16 20:02:53)}
-"#;
+";
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test_multiline.log");
     let mut file = File::create(&file_path).unwrap();
@@ -217,7 +216,9 @@ fn test_from_file_io_error() {
     assert_eq!(logs.len(), 0);
     assert!(errors.iter().any(|(_, _, e)| {
         let s = format!("{e}");
-        s.contains("IO错误") || s.contains("No such file") || s.contains("找不到")
+        s.contains("IO错误")
+            || s.contains("No such file")
+            || s.contains("找不到")
     }));
 }
 
@@ -246,7 +247,8 @@ fn test_sqllogerror_display_all() {
     assert!(format!("{io_err}").contains("IO错误"));
     // 构造 FromUtf8Error：尝试将非法 UTF8 字节转为 String
     let bytes = [0xff, 0xfe, 0xfd];
-    let utf8_err = SqllogError::Utf8(std::str::from_utf8(&bytes).err().unwrap());
+    let utf8_err =
+        SqllogError::Utf8(std::str::from_utf8(&bytes).err().unwrap());
     assert!(
         format!("{utf8_err}").contains("UTF8")
             || format!("{utf8_err}").contains("utf8")
@@ -274,8 +276,7 @@ fn test_from_line_edge_cases() {
     let line_empty = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) ";
     let log_empty = Sqllog::from_line(line_empty, 1).unwrap().unwrap();
     assert!(log_empty.description.is_empty());
-    let line_multiline =
-        "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) 第一行\n第二行";
+    let line_multiline = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) 第一行\n第二行";
     let log_multiline = Sqllog::from_line(line_multiline, 1).unwrap().unwrap();
     assert!(log_multiline.description.contains("第一行"));
     let line_special = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) 特殊字符!@#￥%……&*()_+";
@@ -315,10 +316,10 @@ fn test_appname_ip_edge_cases() {
     let log = Sqllog::from_line(line_ipv6, 1).unwrap().unwrap();
     // 兼容实际解析结果，appname 可能为 None 或包含 TestApp
     if let Some(val) = &log.appname {
-        assert!(val.starts_with("TestApp"))
+        assert!(val.starts_with("TestApp"));
     }
     if let Some(val) = &log.ip {
-        assert!(val.contains(":"))
+        assert!(val.contains(':'));
     }
     let line_appname_space = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2 appname:  ip:::ffff:127.0.0.1) test";
     let log = Sqllog::from_line(line_appname_space, 1).unwrap().unwrap();
@@ -333,8 +334,7 @@ fn test_appname_ip_none_and_empty() {
     assert_eq!(log.appname, None);
     assert_eq!(log.ip, None);
     // appname 为空字符串
-    let line =
-        "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2 appname:  ) test";
+    let line = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2 appname:  ) test";
     let log = Sqllog::from_line(line, 1).unwrap().unwrap();
     assert!(matches!(log.appname, Some(ref s) if s.trim().is_empty()));
 }
@@ -387,7 +387,8 @@ fn test_from_line_desc_regex_parse_fail() {
 #[test]
 fn test_from_line_format_error_branch() {
     // session 字段缺失，触发 Format 错误分支
-    let line = "2025-10-10 10:10:10.100 (EP[1] thrd:1 user:U trxid:1 stmt:0x2) test";
+    let line =
+        "2025-10-10 10:10:10.100 (EP[1] thrd:1 user:U trxid:1 stmt:0x2) test";
     let res = Sqllog::from_line(line, 1);
     assert!(res.is_err());
     if let Err(e) = res {
@@ -420,7 +421,8 @@ fn test_from_file_with_errors_segment_none() {
 #[test]
 fn test_from_line_missing_fields() {
     // 缺少 session 字段
-    let line = "2025-10-10 10:10:10.100 (EP[1] thrd:1 user:U trxid:1 stmt:0x2) test";
+    let line =
+        "2025-10-10 10:10:10.100 (EP[1] thrd:1 user:U trxid:1 stmt:0x2) test";
     let res = Sqllog::from_line(line, 1);
     assert!(res.is_err());
 }
@@ -586,7 +588,8 @@ fn test_is_first_row_valid_and_invalid() {
 fn test_from_line_parses_full_segment() {
     let segment = "2025-09-20 12:34:56.789 (EP[123] sess:0x1a2b thrd:123 user:john trxid:456 stmt:0xabc appname:myapp ip:127.0.0.1) [INS]: EXECTIME: 100(ms) ROWCOUNT: 3 EXEC_ID: 42.";
 
-    let res = Sqllog::from_line(segment, 1).expect("from_line should not error");
+    let res =
+        Sqllog::from_line(segment, 1).expect("from_line should not error");
     assert!(res.is_some());
     let log = res.unwrap();
 

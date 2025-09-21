@@ -21,8 +21,11 @@ pub fn get_sqllog_dir() -> PathBuf {
         info!("sqllog 路径: {path}");
         return PathBuf::from(path);
     }
+
     // 交互输入（使用 std::io）
-    print!("请输入 sqllog 文件夹路径（会查询目录下面的 dmsql*.log 文件来解析）: ");
+    print!(
+        "请输入 sqllog 文件夹路径（会查询目录下面的 dmsql*.log 文件来解析）: "
+    );
     io::stdout().flush().ok();
     let mut input = String::new();
     io::stdin().read_line(&mut input).expect("读取输入失败");

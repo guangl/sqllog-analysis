@@ -46,27 +46,14 @@ fn test_write_and_index_duckdb() {
         },
     ];
 
-    // write to DB and collect index creation report
-    let reports =
-        duckdb_writer::write_sqllogs_to_duckdb_with_chunk_and_report(&db_path, &records, 1, true)
-            .expect("write should succeed");
-
-    // ensure index creation produced reports and none contain errors
-    assert!(!reports.is_empty());
-    for r in &reports {
-        assert!(
-            r.error.is_none(),
-            "index '{}' failed: {:?}",
-            r.statement,
-            r.error
-        );
-    }
+    // write to DB (索引功能已移除，测试仅验证写入与查询结果)
+    duckdb_writer::write_sqllogs_to_duckdb(&db_path, &records)
+        .expect("write should succeed");
 
     // open DB and verify rows
     let conn = Connection::open(&db_path).expect("open db");
-    let mut stmt = conn
-        .prepare("SELECT COUNT(*) FROM sqllogs")
-        .expect("prepare");
+    let mut stmt =
+        conn.prepare("SELECT COUNT(*) FROM sqllogs").expect("prepare");
     let count: i64 = stmt.query_row([], |row| row.get(0)).expect("query_row");
     assert_eq!(count, 2);
 

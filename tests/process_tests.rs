@@ -10,7 +10,8 @@ use tempfile::tempdir;
 #[test]
 fn test_process_sqllog_dir_empty() {
     let dir = tempdir().unwrap();
-    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) =
+        process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 0);
     assert_eq!(total_logs, 0);
     assert!(error_files.is_empty());
@@ -22,7 +23,8 @@ fn test_process_sqllog_dir_with_error_file() {
     let file_path = dir.path().join("dmsql_test.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "bad line").unwrap();
-    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) =
+        process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 1);
     assert_eq!(total_logs, 0);
     assert!(!error_files.is_empty());
@@ -35,7 +37,8 @@ fn test_process_sqllog_dir_non_utf8_file() {
     let file_path = dir.path().join("dmsql_nonutf8.log");
     let mut file = File::create(&file_path).unwrap();
     file.write_all(&[0xff, 0xfe, 0xfd]).unwrap();
-    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) =
+        process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 1);
     assert_eq!(total_logs, 0);
     assert!(!error_files.is_empty());
@@ -48,7 +51,8 @@ fn test_process_sqllog_dir_no_dmsql_files() {
     let file_path = dir.path().join("other.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "test").unwrap();
-    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) =
+        process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 0);
     assert_eq!(total_logs, 0);
     assert!(error_files.is_empty());
@@ -57,14 +61,8 @@ fn test_process_sqllog_dir_no_dmsql_files() {
 #[test]
 fn test_write_error_files_non_empty() {
     let errors = vec![
-        (
-            "file1.log".to_string(),
-            "行1: 错误内容\n内容: bad".to_string(),
-        ),
-        (
-            "file2.log".to_string(),
-            "行2: 错误内容\n内容: bad2".to_string(),
-        ),
+        ("file1.log".to_string(), "行1: 错误内容\n内容: bad".to_string()),
+        ("file2.log".to_string(), "行2: 错误内容\n内容: bad2".to_string()),
     ];
     let result = write_error_files(&errors);
     assert!(result.is_ok());
@@ -88,16 +86,15 @@ fn test_write_error_files_io_error() {
     let _file = OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(true)
         .open(&file_path)
         .unwrap();
     // 设置只读权限（跨平台）
     let mut perms = fs::metadata(&file_path).unwrap().permissions();
     perms.set_readonly(true);
     fs::set_permissions(&file_path, perms).unwrap();
-    let errors = vec![(
-        "file1.log".to_string(),
-        "行1: 错误内容\n内容: bad".to_string(),
-    )];
+    let errors =
+        vec![("file1.log".to_string(), "行1: 错误内容\n内容: bad".to_string())];
     // 将当前目录切换到临时目录
     let old_dir = env::current_dir().unwrap();
     env::set_current_dir(dir.path()).unwrap();
@@ -135,7 +132,8 @@ fn test_process_sqllog_dir_mixed_files() {
     let mut f_other = File::create(&file_other).unwrap();
     writeln!(f_other, "just for test").unwrap();
     // 执行综合处理
-    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) =
+        process_sqllog_dir(dir.path()).unwrap();
     // 只统计 dmsql*.log 文件
     assert_eq!(total_files, 4);
     // 合法日志能被解析
@@ -153,14 +151,8 @@ fn test_process_sqllog_dir_mixed_files() {
     );
     // 空日志不产生错误
     assert!(
-        !error_files
-            .iter()
-            .any(|(fname, _)| fname.contains("dmsql_empty.log"))
+        !error_files.iter().any(|(fname, _)| fname.contains("dmsql_empty.log"))
     );
     // 非目标文件不统计
-    assert!(
-        !error_files
-            .iter()
-            .any(|(fname, _)| fname.contains("other.log"))
-    );
+    assert!(!error_files.iter().any(|(fname, _)| fname.contains("other.log")));
 }

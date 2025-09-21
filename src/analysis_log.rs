@@ -1,21 +1,23 @@
-//! 日志功能模块
-//!
-//! 提供统一的日志初始化与参数解析接口（使用 `tracing` / `tracing-subscriber`），
-//! 支持同时输出到终端和文件（按天命名），并尽量在初始化失败时给出友好的错误提示。
-
 use chrono::Local;
+use lazy_static::lazy_static;
 use log::LevelFilter;
+use std::sync::Mutex;
 use std::{env, fs, fs::OpenOptions, io, path::PathBuf};
 use tracing::info;
-use tracing_appender::non_blocking::NonBlocking;
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+lazy_static! {
+    // 保持 guard 在程序生命周期内，退出时可以 take() 来触发 flush/drop
+    static ref LOG_GUARD: Mutex<Option<WorkerGuard>> = Mutex::new(None);
+}
 
 /// 日志配置参数
 pub struct LogConfig {
     pub enabled: bool,
     pub level: LevelFilter,
     pub log_file: Option<PathBuf>,
-    pub enable_stdout: Option<bool>,
+    pub enable_stdout: bool,
 }
 
 impl Default for LogConfig {
@@ -23,8 +25,8 @@ impl Default for LogConfig {
         Self {
             enabled: true,
             level: LevelFilter::Info,
-            log_file: None,
-            enable_stdout: None,
+            log_file: Some("sqllog".into()),
+            enable_stdout: false,
         }
     }
 }
@@ -49,7 +51,9 @@ impl LogConfig {
                 let mut p = match env::current_dir() {
                     Ok(p) => p,
                     Err(e) => {
-                        eprintln!("无法获取当前工作目录，使用 '.' 作为基准: {e}");
+                        eprintln!(
+                            "无法获取当前工作目录，使用 '.' 作为基准: {e}"
+                        );
                         PathBuf::from(".")
                     }
                 };
@@ -70,42 +74,40 @@ impl LogConfig {
         let file_path = dir.join(filename);
 
         // 打开（创建并追加）文件
-        let file = match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&file_path)
-        {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("无法创建日志文件 {}: {e}", file_path.display());
-                return;
-            }
-        };
+        let file =
+            match OpenOptions::new().create(true).append(true).open(&file_path)
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("无法创建日志文件 {}: {e}", file_path.display());
+                    return;
+                }
+            };
 
         let (non_blocking, guard) = NonBlocking::new(file);
-        // 将 guard 泄漏为静态引用以保证其在程序生命周期内存活，从而
-        // 可以安全地使用 non_blocking writer（简洁且比 std::mem::forget 更明确）。
-        let _guard_ref: &'static _ = Box::leak(Box::new(guard));
+        // 将 guard 存入全局可控位置，以便在退出时可显式 drop（触发 flush）
+        if let Ok(mut g) = LOG_GUARD.lock() {
+            *g = Some(guard);
+        }
 
         // 创建输出层：文件层始终启用；stdout 层使用配置中的值（若指定），否则在 debug 构建启用，在 release 构建关闭。
-        let enable_stdout = self.enable_stdout.unwrap_or(cfg!(debug_assertions));
-        let stdout_filter = if enable_stdout {
+        let stdout_filter = if self.enable_stdout {
             filter.clone()
         } else {
             EnvFilter::new("off")
         };
 
-        let stdout_layer = fmt::layer()
-            .with_writer(io::stdout)
-            .with_filter(stdout_filter);
-        let file_layer = fmt::layer().with_writer(non_blocking).with_filter(filter);
+        let stdout_layer =
+            fmt::layer().with_writer(io::stdout).with_filter(stdout_filter);
+        let file_layer =
+            fmt::layer().with_writer(non_blocking).with_filter(filter);
 
         tracing_subscriber::registry()
             .with(stdout_layer)
             .with(file_layer)
             .init();
 
-        if enable_stdout {
+        if self.enable_stdout {
             info!("日志功能已启用（stdout + file），等级: {:?}", self.level);
         } else {
             info!("日志功能已启用（仅文件），等级: {:?}", self.level);

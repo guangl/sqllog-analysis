@@ -19,6 +19,9 @@ allowed-duplicate-crates = [
   "syn",
   "wasi",
   "ahash",
+  "toml_datetime",
+  "toml_edit",
+  "winnow",
 ]
 
 # 可选：对部分规则进行强制

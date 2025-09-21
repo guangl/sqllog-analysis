@@ -1,6 +1,6 @@
 [package]
 name = "sqllog-analysis"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["guangl"]
 description = "达梦数据库的 sqllog 日志分析工具"
@@ -15,38 +15,28 @@ categories = [
 
 [dependencies]
 anyhow = "1.0.100"
-# dialoguer replaced by std::io to avoid pulling console/terminal transitive deps
 regex = "1.11"
 lazy_static = "1.5"
 tempfile = "3.22"
 memchr = "2.7"
 thiserror = "2.0"
-# windows-sys 由依赖树自动选择，不需要显式声明，移除以减少多版本约束
 log = "0.4"
-# use tracing + tracing-subscriber to avoid pulling anstream/anstyle
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-# rolling file appender for tracing
 tracing-appender = "0.2"
-# flexi_logger removed in favor of env_logger to reduce transitive windows-* versions
 chrono = "0.4"
 duckdb = { version = "1.4.0", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.7"
 dirs = "4"
+ctrlc = "3"
 
 [dev-dependencies]
 criterion = "0.7"
 regex = "1.11"
 lazy_static = "1.5"
 chrono = "0.4"
-
-[features]
-# Optional feature to expose test helpers (e.g. set_inject_bad_index) for
-# CI/dev debugging and integration tests. Disabled by default so production
-# builds don't export testing APIs unintentionally.
-test-helpers = []
 
 [[bench]]
 name = "datetime_benchmark"

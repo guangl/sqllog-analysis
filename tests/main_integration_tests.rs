@@ -26,7 +26,8 @@ fn test_main_with_error_files() {
     let file_path = dir.path().join("dmsql_test.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "bad line").unwrap();
-    let (total_files, total_logs, error_files, _elapsed) = process_sqllog_dir(dir.path()).unwrap();
+    let (total_files, total_logs, error_files, _elapsed) =
+        process_sqllog_dir(dir.path()).unwrap();
     assert_eq!(total_files, 1);
     assert_eq!(total_logs, 0);
     assert!(!error_files.is_empty());
@@ -43,8 +44,14 @@ fn test_main_no_log_files() {
         for entry in fs::read_dir(dir.path()).unwrap() {
             let path = entry.unwrap().path();
             if path.is_file() {
-                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                    if filename.starts_with("dmsql") && filename.ends_with(".log") {
+                if let Some(filename) =
+                    path.file_name().and_then(|n| n.to_str())
+                {
+                    if filename.starts_with("dmsql")
+                        && std::path::Path::new(filename)
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("log"))
+                    {
                         println!("处理文件: {filename}");
                     }
                 }

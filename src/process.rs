@@ -1,5 +1,3 @@
-#![allow(clippy::type_complexity)]
-#![allow(clippy::items_after_statements)]
 use crate::sqllog::Sqllog;
 use anyhow::Result;
 use log::{info, trace};
@@ -8,7 +6,11 @@ use std::{
     io::Write,
     path::Path,
     time,
+    time::Instant,
 };
+
+// 提炼复杂返回类型，避免 clippy::type_complexity 警告
+type ProcessResult = (usize, usize, Vec<(String, String)>, time::Duration);
 
 /// 扫描指定目录，解析所有 dmsql*.log 文件。
 ///
@@ -29,19 +31,17 @@ use std::{
 /// - 每个文件调用 `Sqllog::from_file_with_errors` 进行分段解析
 /// - 所有解析错误（格式/UTF8/IO等）均收集到 `error_files`
 /// - 解析进度和耗时通过 println 输出
-pub fn process_sqllog_dir<P: AsRef<Path>>(
-    dir: P,
-) -> Result<(usize, usize, Vec<(String, String)>, time::Duration)> {
+pub fn process_sqllog_dir<P: AsRef<Path>>(dir: P) -> Result<ProcessResult> {
     let mut total_files = 0;
     let mut total_logs = 0;
     let mut error_files = Vec::new();
-    use time::Instant;
     let global_start = Instant::now();
-    // 遍历目录下所有文件
+
+    // 遍历目录下的所有文件
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
-        // 跳过非文件（如文件夹）
+        // 跳过非文件项（例如目录）
         if !path.is_file() {
             continue;
         }
@@ -70,14 +70,17 @@ pub fn process_sqllog_dir<P: AsRef<Path>>(
             }
         }
     }
+
     let global_elapsed = global_start.elapsed();
     Ok((total_files, total_logs, error_files, global_elapsed))
 }
 
-/// Parse a single sqllog file and return parsed records and formatted errors.
+/// 解析单个 sqllog 文件并返回解析出的记录和格式化的错误列表。
 ///
-/// Returns (Vec<Sqllog>, Vec<(file_name, formatted_error)>)
-pub fn parse_sqllog_file<P: AsRef<Path>>(path: P) -> (Vec<Sqllog>, Vec<(String, String)>) {
+/// 返回 (Vec<Sqllog>, Vec<(文件名, 格式化后的错误)>)
+pub fn parse_sqllog_file<P: AsRef<Path>>(
+    path: P,
+) -> (Vec<Sqllog>, Vec<(String, String)>) {
     let path_ref = path.as_ref();
     let file_name = path_ref
         .file_name()
