@@ -1,0 +1,51 @@
+name: clippy-strict
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Run clippy (strict)
+        id: clippy
+        run: |
+          cargo clippy --all-targets --all-features -- -D warnings -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+
+      - name: Attempt automated fixes if clippy failed
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "Clippy failed — attempting cargo fix"
+          cargo fix --allow-dirty --allow-staged || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BRANCH="auto/clippy-fix-${GITHUB_RUN_ID}"
+          git checkout -b "$BRANCH"
+          git add -A || true
+          if git diff --staged --quiet && git diff --quiet; then
+            echo "No changes produced by cargo fix"
+            exit 0
+          fi
+          git commit -m "chore(clippy): automated fix (CI)"
+          git push --set-upstream origin "$BRANCH"
+          PR_TITLE="chore(clippy): automated fixes from CI"
+          PR_BODY="This PR contains automated fixes produced by cargo fix in the clippy-strict workflow. Please review before merging."
+          curl -s -S -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/pulls \
+            -d "{\"title\": \"${PR_TITLE}\", \"head\": \"${BRANCH}\", \"base\": \"${{ github.event.pull_request.base.ref }}\", \"body\": \"${PR_BODY}\"}"
