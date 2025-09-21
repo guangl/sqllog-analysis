@@ -27,3 +27,22 @@
 - 配置字段名、SQL 语句与导出格式 token 保持不变，现有 `config.toml` 文件应与本次发布兼容。
 
 [v0.3.0]: https://github.com/guangl/sqllog-analysis/releases/tag/v0.3.0
+
+## [v0.3.1] - 2025-09-22
+### 新增 / 改进
+- 增加流式（chunked）解析 API：提供 `Sqllog::parse_all` 与 `Sqllog::parse_in_chunks`，支持按行读取原始字节（保留 CR/LF）、分块回调（成功/错误回调分离）以降低内存占用并支持实时处理。
+- 将原有解析逻辑拆分为更小的 helper，并移除过时的 `get_raw_line`，部分解析实现迁移到 `src/sqllog/*` 模块内以改善代码结构。
+- 在 `config.toml` 中新增 `log.level` 配置，用于设置运行时的日志等级（支持：error/warn/info/debug/trace/off），并将该配置注入到日志初始化流程中。
+- 更新并修复基准（benches）和单元测试以配合新的 API，新增针对分块解析的测试用例。
+
+### 修复
+- 解决空白段被误报为 Format 错误的问题（跳过仅包含空白/换行的段落）。
+- 修复并通过 Clippy 的若干警告（包括格式化和字符比较的改进）。
+
+### 重构
+- 将大量老旧的 sqllog 解析和 IO 代码重构为多个文件（`io.rs`、`parser.rs`、`utils.rs`、`types.rs`），移除部分不再使用的 DuckDB 写入器代码。
+
+### 兼容性说明
+- 新增的解析 API 向后兼容大多数使用场景，但旧的 `from_file_with_errors` 等已被移除或替换，使用前请查看 API 文档并更新调用处。
+
+[v0.3.1]: https://github.com/guangl/sqllog-analysis/releases/tag/v0.3.1
