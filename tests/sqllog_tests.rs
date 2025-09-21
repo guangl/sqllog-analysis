@@ -1,5 +1,30 @@
 #![allow(invalid_from_utf8)]
 use sqllog_analysis::sqllog::*;
+use std::path::Path;
+
+fn parse_file_collect<P: AsRef<Path>>(
+    path: P,
+) -> (Vec<Sqllog>, Vec<(usize, String, String)>) {
+    let mut logs: Vec<Sqllog> = Vec::new();
+    let mut errors: Vec<(usize, String, String)> = Vec::new();
+    let res = Sqllog::parse_all(
+        path.as_ref(),
+        |chunk| {
+            for l in chunk.iter() {
+                logs.push(l.clone());
+            }
+        },
+        |err_chunk| {
+            for e in err_chunk.iter() {
+                errors.push((e.0, e.1.clone(), format!("{}", e.2)));
+            }
+        },
+    );
+    if let Err(e) = res {
+        errors.push((0usize, "parse_all fatal".to_string(), format!("{e}")));
+    }
+    (logs, errors)
+}
 use std::{
     fs::File,
     io::{self, Write},
@@ -51,7 +76,7 @@ fn test_from_file_empty_file() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("empty.log");
     File::create(&file_path).unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert_eq!(logs.len(), 0);
     assert_eq!(errors.len(), 0);
 }
@@ -64,7 +89,7 @@ fn test_from_file_only_invalid_lines() {
     writeln!(file, "bad").unwrap();
     writeln!(file, "not a log").unwrap();
     writeln!(file, "123").unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert_eq!(logs.len(), 0);
     assert!(!errors.is_empty());
 }
@@ -75,10 +100,10 @@ fn test_from_file_invalid_utf8() {
     let file_path = dir.path().join("invalid_utf8.log");
     let mut file = File::create(&file_path).unwrap();
     file.write_all(&[0xff, 0xfe, 0xfd]).unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert_eq!(logs.len(), 0);
     assert!(
-        errors.iter().any(|(_, _, e)| format!("{e}").contains("UTF"))
+        errors.iter().any(|(_, _, e)| e.to_string().contains("UTF"))
             || !errors.is_empty()
     );
 }
@@ -104,7 +129,7 @@ fn test_sqllog_parsing() {
     let file_path = dir.path().join("test.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "{test_log}").unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     for (i, log) in logs.iter().enumerate() {
         println!(
             "记录 {}: occurrence_time={}, user={:?}, description={}",
@@ -124,10 +149,10 @@ fn test_sqllog_parsing() {
     assert_eq!(log1.appname, None);
     assert_eq!(log1.ip, Some("10.80.147.109".to_string()));
     assert_eq!(log1.sql_type, None);
-    // description 多行，断言只检查非空和关键字
-    println!("parsing description: {}", log1.description);
     assert!(!log1.description.is_empty());
-    assert!(log1.description.contains("PARAMS(SEQNO, TYPE, DATA)"));
+    assert_eq!(log1.description, "PARAMS(SEQNO, TYPE, DATA)={(0, NUMBER, 1705459), (1, VARCHAR2, 'CS_c768d88f3a07'), (2, VARCHAR2, NULL), (3, NUMBER, 0), (4, VARCHAR2, ''), (5, VARCHAR2, NULL), (6, VARCHAR2, NULL), (7, VARCHAR2, 'other'), (8, VARCHAR2, NULL), (9, VARCHAR2, '5'), (10, NUMBER, 0), (11, VARCHAR2, NULL), (12, VARCHAR2, '无'), (13, TIMESTAMP, 2019-09-01 00:00:00), (14, TIMESTAMP, 2020-01-01 00:00:00), (15, NUMBER, 0), (16, VARCHAR2, NULL), (17, VARCHAR2, NULL), (18, VARCHAR2, NULL), (19, VARCHAR2, '
+1
+1'), (20, VARCHAR2, NULL), (21, TIMESTAMP, 2022-10-24 21:41:38), (22, TIMESTAMP, NULL), (23, TIMESTAMP, NULL), (24, NUMBER, 1), (25, VARCHAR2, NULL), (26, VARCHAR2, NULL), (27, VARCHAR2, NULL), (28, NUMBER, 3), (29, VARCHAR2, NULL), (30, TIMESTAMP, 2025-09-16 20:02:53)}");
     assert_eq!(log1.execute_time, None);
     assert_eq!(log1.rowcount, None);
     assert_eq!(log1.execute_id, None);
@@ -146,6 +171,12 @@ fn test_sqllog_parsing() {
     assert_eq!(log2.execute_time, None);
     assert_eq!(log2.rowcount, None);
     assert_eq!(log2.execute_id, None);
+    let log3 = &logs[2];
+    assert_eq!(log3.description, "PARAMS(SEQNO, TYPE, DATA)={(0, NUMBER, 1705946), (1, VARCHAR2, 'CS_0bfaa9ae2d7b'), (2, VARCHAR2, NULL), (3, NUMBER, NULL), (4, VARCHAR2, '1'), (5, VARCHAR2, NULL), (6, VARCHAR2, NULL), (7, VARCHAR2, '9'), (8, VARCHAR2, '65'), (9, VARCHAR2, '5'), (10, NUMBER, 1), (11, VARCHAR2, NULL), (12, VARCHAR2, NULL), (13, TIMESTAMP, 2021-03-01 00:00:00), (14, TIMESTAMP, 2022-07-01 00:00:00), (15, NUMBER, 0), (16, VARCHAR2, NULL), (17, VARCHAR2, NULL), (18, VARCHAR2, NULL), (19, VARCHAR2, '1
+
+2
+
+3'), (20, VARCHAR2, NULL), (21, TIMESTAMP, 2022-10-24 23:19:32), (22, TIMESTAMP, NULL), (23, TIMESTAMP, NULL), (24, NUMBER, 1), (25, VARCHAR2, NULL), (26, VARCHAR2, NULL), (27, VARCHAR2, NULL), (28, NUMBER, 0), (29, VARCHAR2, NULL), (30, TIMESTAMP, 2025-09-16 20:02:53)}");
 }
 
 #[test]
@@ -195,7 +226,8 @@ fn test_multiline_description() {
     let file_path = dir.path().join("test_multiline.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "{test_log}").unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
+    eprintln!("test_multiline_description errors: {errors:?}");
     assert_eq!(logs.len(), 4);
     assert_eq!(errors.len(), 0);
     let log1 = &logs[0];
@@ -212,10 +244,10 @@ fn test_other_error_display() {
 
 #[test]
 fn test_from_file_io_error() {
-    let (logs, errors) = Sqllog::from_file_with_errors("not_exist_file.log");
+    let (logs, errors) = parse_file_collect("not_exist_file.log");
     assert_eq!(logs.len(), 0);
     assert!(errors.iter().any(|(_, _, e)| {
-        let s = format!("{e}");
+        let s = e.to_string();
         s.contains("IO错误")
             || s.contains("No such file")
             || s.contains("找不到")
@@ -300,7 +332,7 @@ fn test_from_file_mixed_lines() {
         "2025-10-10 10:10:10.100 (EP[1] sess:0x2 thrd:2 user:U trxid:2) 第二行"
     )
     .unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert_eq!(logs.len(), 1);
     assert_eq!(errors.len(), 1);
     assert!(logs[0].description.contains("有效行"));
@@ -343,10 +375,10 @@ fn test_appname_ip_none_and_empty() {
 fn test_print_progress_no_panic() {
     // 仅测试 print_progress 不 panic
     let mut last_percent = 0u8;
-    Sqllog::print_progress(0, 100, &mut last_percent);
-    Sqllog::print_progress(5, 100, &mut last_percent);
-    Sqllog::print_progress(50, 100, &mut last_percent);
-    Sqllog::print_progress(100, 100, &mut last_percent);
+    Sqllog::print_progress(0, 100, &mut last_percent, "testfile.log");
+    Sqllog::print_progress(5, 100, &mut last_percent, "testfile.log");
+    Sqllog::print_progress(50, 100, &mut last_percent, "testfile.log");
+    Sqllog::print_progress(100, 100, &mut last_percent, "testfile.log");
 }
 
 #[test]
@@ -404,7 +436,7 @@ fn test_from_file_with_errors_segment_none() {
     let mut file = File::create(&file_path).unwrap();
     // 构造一段无法被正则解析但非空的内容
     writeln!(file, "2025-10-10 10:10:10.100 (EP[1] sess:NULL thrd:NULL user:NULL trxid:NULL stmt:NULL) bad desc").unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     // 主逻辑会生成日志对象，但所有字段为 None
     assert_eq!(logs.len(), 1);
     let log = &logs[0];
@@ -462,19 +494,19 @@ fn test_from_file_with_errors_has_first_row_false() {
     let file_path = dir.path().join("invalid.log");
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "not a valid log").unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert!(logs.is_empty());
     assert_eq!(errors.len(), 1);
-    assert!(format!("{}", errors[0].2).contains("无有效日志行"));
+    assert!(errors[0].2.to_string().contains("无有效日志行"));
 }
 
 #[test]
 fn test_from_file_with_errors_io_error() {
     // 文件不存在
-    let (logs, errors) = Sqllog::from_file_with_errors("not_exist_file.log");
+    let (logs, errors) = parse_file_collect("not_exist_file.log");
     assert!(logs.is_empty());
     assert!(!errors.is_empty());
-    assert!(format!("{}", errors[0].2).contains("IO错误"));
+    assert!(errors[0].2.to_string().contains("IO错误"));
 }
 
 #[test]
@@ -484,10 +516,10 @@ fn test_from_file_with_errors_utf8_error() {
     let file_path = dir.path().join("utf8_error.log");
     let mut file = File::create(&file_path).unwrap();
     file.write_all(&[0xff, 0xfe, 0xfd]).unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert!(logs.is_empty());
     assert!(!errors.is_empty());
-    assert!(format!("{}", errors[0].2).contains("UTF8"));
+    assert!(errors[0].2.to_string().contains("UTF8"));
 }
 
 #[test]
@@ -498,7 +530,7 @@ fn test_from_file_with_errors_last_segment_error() {
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "2025-10-10 10:10:10.100 (EP[1] sess:0x1234 thrd:1234 user:SYSDBA trxid:5678 stmt:0xabcd) [SEL]: SELECT 1").unwrap();
     writeln!(file, "bad last segment").unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     println!("解析结果 logs.len(): {}", logs.len());
     for (i, log) in logs.iter().enumerate() {
         println!("log[{}].description: {:?}", i, log.description);
@@ -529,11 +561,11 @@ fn test_from_file_with_errors_only_spaces() {
     writeln!(file, "   ").unwrap();
     writeln!(file, "\t\t").unwrap();
     writeln!(file).unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     // 没有有效日志行
     assert!(logs.is_empty());
     assert_eq!(errors.len(), 1);
-    assert!(format!("{}", errors[0].2).contains("无有效日志行"));
+    assert!(errors[0].2.to_string().contains("无有效日志行"));
 }
 
 #[test]
@@ -544,7 +576,7 @@ fn test_from_file_with_errors_segment_buf_unparsable() {
     let mut file = File::create(&file_path).unwrap();
     writeln!(file, "2025-10-10 10:10:10.100 (EP[1] sess:NULL thrd:NULL user:NULL trxid:NULL stmt:NULL) bad desc").unwrap();
     writeln!(file, "not a valid log").unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert_eq!(logs.len(), 1);
     assert!(logs[0].description.contains("bad desc"));
     assert!(errors.is_empty());
@@ -563,10 +595,10 @@ fn test_appname_ip_special_characters() {
 fn test_print_progress_extreme_values() {
     // print_progress 边界值（不测试溢出场景）
     let mut last_percent = 0u8;
-    Sqllog::print_progress(0, 0, &mut last_percent); // total=0
-    Sqllog::print_progress(0, 100, &mut last_percent); // current=0
-    Sqllog::print_progress(100, 100, &mut last_percent); // current=total
-    Sqllog::print_progress(50, 100, &mut last_percent); // 正常值
+    Sqllog::print_progress(0, 0, &mut last_percent, "testfile.log"); // total=0
+    Sqllog::print_progress(0, 100, &mut last_percent, "testfile.log"); // current=0
+    Sqllog::print_progress(100, 100, &mut last_percent, "testfile.log"); // current=total
+    Sqllog::print_progress(50, 100, &mut last_percent, "testfile.log"); // 正常值
 }
 
 #[test]
@@ -619,7 +651,7 @@ fn test_from_file_with_leading_whitespace() {
         "\t2025-10-10 10:10:11.200 (EP[1] sess:0x2 thrd:2 user:V trxid:2 stmt:0x3) second"
     )
     .unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert_eq!(logs.len(), 2);
     assert!(errors.is_empty());
 }
@@ -640,7 +672,7 @@ fn test_from_file_consecutive_segments() {
         "2025-10-10 10:10:11.100 (EP[2] sess:0x2 thrd:2 user:V trxid:2 stmt:0x3) second"
     )
     .unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     assert_eq!(logs.len(), 2);
     assert!(errors.is_empty());
 }
@@ -662,12 +694,12 @@ fn test_from_file_with_invalid_utf8_in_middle() {
         "2025-10-10 10:10:12.100 (EP[3] sess:0x3 thrd:3 user:W trxid:3 stmt:0x4) after"
     )
     .unwrap();
-    let (logs, errors) = Sqllog::from_file_with_errors(&file_path);
+    let (logs, errors) = parse_file_collect(&file_path);
     // 应当成功解析两条有效日志，并记录至少一个 UTF8 错误
     assert_eq!(logs.len(), 2);
     assert!(
         errors
             .iter()
-            .any(|(_, _, e)| format!("{e}").to_lowercase().contains("utf"))
+            .any(|(_, _, e)| e.to_string().to_lowercase().contains("utf"))
     );
 }
