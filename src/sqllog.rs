@@ -1,11 +1,10 @@
 use core::num;
-use lazy_static::lazy_static; // 用于静态正则表达式
+use lazy_static::lazy_static;
 use log::{error, info, trace};
-use memchr::memchr; // 高效查找字节分隔符
+use memchr::memchr;
 use regex::Regex;
-// 正则表达式解析日志
-use std::{fs, io, path::Path, result, str}; // 文件路径处理
-use thiserror::Error; // 错误类型派生
+use std::{fs, io, path::Path, result, str};
+use thiserror::Error;
 
 /// 通用结果类型，统一错误处理
 pub type SResult<T> = result::Result<T, SqllogError>;
@@ -42,7 +41,8 @@ pub enum SqllogError {
 }
 
 /// 每月天数（非闰年），用于日期合法性校验
-const DAYS_IN_MONTH: [u8; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const DAYS_IN_MONTH: [u8; 12] =
+    [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /// 单条 SQL 日志结构体，包含所有解析字段
 #[derive(Default, Debug)]
@@ -117,7 +117,11 @@ impl Sqllog {
     }
 
     // 将字段解析抽离为私有辅助函数，保持行为不变（主解析逻辑尽量简短以通过 clippy::too_many_lines）
-    fn parse_fields(caps: &regex::Captures, segment: &str, line_num: usize) -> SResult<Self> {
+    fn parse_fields(
+        caps: &regex::Captures,
+        segment: &str,
+        line_num: usize,
+    ) -> SResult<Self> {
         let occurrence_time = Self::get_capture(caps, 1, line_num, segment)?;
         let ep: i32 = Self::get_capture(caps, 2, line_num, segment)?
             .parse()
@@ -143,19 +147,11 @@ impl Sqllog {
         let statement = Self::parse_optional(caps, 7, line_num, segment)?;
         let appname = caps.get(8).and_then(|m| {
             let s = m.as_str();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
-            }
+            if s.is_empty() { None } else { Some(s.to_string()) }
         });
         let ip = caps.get(9).and_then(|m| {
             let s = m.as_str();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
-            }
+            if s.is_empty() { None } else { Some(s.to_string()) }
         });
         let sql_type = caps.get(10).map(|m| m.as_str().to_string());
         let description = Self::get_capture(caps, 11, line_num, segment)?;
@@ -188,12 +184,9 @@ impl Sqllog {
         line_num: usize,
         seg: &str,
     ) -> Result<String, SqllogError> {
-        caps.get(idx)
-            .map(|m| m.as_str().to_string())
-            .ok_or_else(|| SqllogError::Format {
-                line: line_num,
-                content: seg.to_string(),
-            })
+        caps.get(idx).map(|m| m.as_str().to_string()).ok_or_else(|| {
+            SqllogError::Format { line: line_num, content: seg.to_string() }
+        })
     }
 
     // 私有 helper：解析可能为 NULL 的字段
@@ -214,7 +207,10 @@ impl Sqllog {
     }
 
     // 私有 helper：从 description 中解析 execute_time, rowcount, execute_id
-    fn parse_desc_numbers(desc: &str, line_num: usize) -> Result<DescNumbers, SqllogError> {
+    fn parse_desc_numbers(
+        desc: &str,
+        line_num: usize,
+    ) -> Result<DescNumbers, SqllogError> {
         lazy_static! {
             static ref DESC_RE_INNER: Regex =
                 Regex::new(r"EXECTIME:\s*(\d+)\(ms\)\s*ROWCOUNT:\s*(\d+)\s*EXEC_ID:\s*(\d+).")
@@ -298,7 +294,12 @@ impl Sqllog {
         if is_new_segment {
             *has_first_row = true;
             if !segment_buf.is_empty() {
-                Self::flush_segment_buf(segment_buf, *line_num, sqllogs, errors);
+                Self::flush_segment_buf(
+                    segment_buf,
+                    *line_num,
+                    sqllogs,
+                    errors,
+                );
                 segment_buf.clear();
             }
             *line_num = 1;
@@ -331,7 +332,11 @@ impl Sqllog {
         let data = match fs::read(path.as_ref()) {
             Ok(d) => d,
             Err(e) => {
-                error!("文件读取失败: {}, 错误: {}", path.as_ref().display(), e);
+                error!(
+                    "文件读取失败: {}, 错误: {}",
+                    path.as_ref().display(),
+                    e
+                );
                 return (
                     Vec::new(),
                     vec![(0, format!("IO错误: {e}"), SqllogError::Io(e))],
@@ -370,7 +375,8 @@ impl Sqllog {
         // 使用 impl 上的 helper
 
         while offset < total {
-            let (line_trimmed, next) = Self::next_raw_line_impl(data, offset, total);
+            let (line_trimmed, next) =
+                Self::next_raw_line_impl(data, offset, total);
             offset = next;
 
             Self::print_progress(offset, total, &mut last_percent);
@@ -422,7 +428,12 @@ impl Sqllog {
 
         // 文件结尾最后一段
         if !segment_buf.is_empty() {
-            Self::flush_segment_buf(segment_buf, line_num, &mut sqllogs, &mut errors);
+            Self::flush_segment_buf(
+                segment_buf,
+                line_num,
+                &mut sqllogs,
+                &mut errors,
+            );
         }
 
         info!(
@@ -435,7 +446,11 @@ impl Sqllog {
     }
 
     // 将内部 helper 提升为 impl 方法，便于测试与复用
-    fn next_raw_line_impl(data: &[u8], offset: usize, total: usize) -> (&[u8], usize) {
+    fn next_raw_line_impl(
+        data: &[u8],
+        offset: usize,
+        total: usize,
+    ) -> (&[u8], usize) {
         let end = memchr(b'\n', &data[offset..]).map_or(total, |e| offset + e);
         let line = &data[offset..end];
         let next = end + 1;
@@ -446,11 +461,10 @@ impl Sqllog {
         (line_trimmed, next)
     }
 
-    // Convert a raw line byte slice to a String. On UTF-8 errors we record the
-    // error but return a lossy-decoded String so parsing can continue. If the
-    // decoded string contains leading invalid/replacement characters before a
-    // valid timestamp, try to resynchronize by locating the first timestamp
-    // and trimming the prefix so the parser can detect a new segment.
+    // 将原始行字节切片转换为 String。在发生 UTF-8 错误时我们会记录该错误，
+    // 但返回一个有可能丢失信息的解码字符串以便继续解析。如果解码后的字符串在有效时间戳
+    // 之前包含无效或替换字符，则尝试通过定位第一个时间戳来重新同步并裁剪前缀，以便解析器
+    // 能够检测到新的段落。
     fn line_bytes_to_str_impl(
         line_bytes: &[u8],
         line_num: usize,
@@ -459,19 +473,21 @@ impl Sqllog {
         match str::from_utf8(line_bytes) {
             Ok(s) => s.to_string(),
             Err(e) => {
-                errors.push((line_num, format!("{line_bytes:?}"), SqllogError::Utf8(e)));
+                errors.push((
+                    line_num,
+                    format!("{line_bytes:?}"),
+                    SqllogError::Utf8(e),
+                ));
                 let mut s = String::from_utf8_lossy(line_bytes).to_string();
-                // Trim leading spaces/tabs and replacement characters which may
-                // come from invalid utf-8 sequences.
+                // 裁剪开头的空格/制表符和可能来自无效 UTF-8 序列的替换字符。
                 s = s
                     .trim_start_matches(&[' ', '\t', '\u{FFFD}'][..])
                     .to_string();
 
-                // If the trimmed prefix still doesn't start with a timestamp,
-                // try to find the first position that does.
+                // 如果裁剪后的前缀仍然不以时间戳开始，尝试找到第一个以时间戳开始的位置。
                 if s.len() >= 23 && !is_first_row(&s[0..23]) {
-                    if let Some(pos) =
-                        (0..=s.len().saturating_sub(23)).find(|&i| is_first_row(&s[i..i + 23]))
+                    if let Some(pos) = (0..=s.len().saturating_sub(23))
+                        .find(|&i| is_first_row(&s[i..i + 23]))
                     {
                         s = s[pos..].to_string();
                     }
@@ -490,10 +506,10 @@ impl Sqllog {
         sqllogs: &mut Vec<Self>,
         errors: &mut Vec<(usize, String, SqllogError)>,
     ) {
-        // Always get a String (lossy on invalid UTF-8). UTF-8 errors are
-        // recorded inside line_bytes_to_str_impl but are not fatal; we attempt
-        // to continue parsing following lines.
-        let line_str = Self::line_bytes_to_str_impl(line_bytes, *line_num, errors);
+        // 始终获取一个 String（在无效 UTF-8 情况下可能丢失信息）。UTF-8 错误会在
+        // line_bytes_to_str_impl 中被记录，但不会致命；我们尝试继续解析后续行。
+        let line_str =
+            Self::line_bytes_to_str_impl(line_bytes, *line_num, errors);
 
         Self::process_line(
             &line_str,
@@ -512,16 +528,15 @@ impl Sqllog {
     /// * `total` - 文件总字节数
     /// * `last_percent` - 上次打印的进度百分比
     pub fn print_progress(current: usize, total: usize, last_percent: &mut u8) {
-        // Use integer arithmetic to avoid floating point casts which can lose precision
-        // and trigger clippy pedantic warnings. We compute percentage in basis points
-        // and then divide to get integer percent value.
+        // 使用整数运算以避免浮点转换导致的精度损失并触发 clippy 的严格警告。
+        // 我们先以基点（basis points）计算百分比，然后除以得到整型百分比值。
         if total == 0 {
             return;
         }
         let current_u128 = current as u128;
         let total_u128 = total as u128;
         let percent_u128 = (current_u128.saturating_mul(100u128)) / total_u128;
-        // Convert to u8 safely; if value is out of range, clamp to 100%.
+        // 安全地转换为 u8；若值超出范围，则钳制为 100%。
         let percent = u8::try_from(percent_u128).unwrap_or(100u8);
         if percent >= last_percent.saturating_add(5) {
             print!("\r处理进度: {percent}% ");

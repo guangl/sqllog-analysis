@@ -1,13 +1,22 @@
 use anyhow::Result;
 use log::{error, info, trace};
-use sqllog_analysis::config::Config;
-use sqllog_analysis::process;
 use sqllog_analysis::{
-    duckdb_writer, input_path::get_sqllog_dir, process::write_error_files, sqllog::Sqllog,
+    config::Config,
+    duckdb_writer,
+    input_path::get_sqllog_dir,
+    process::{parse_sqllog_file, write_error_files},
 };
-use std::{fs, path::PathBuf, time::Instant};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
+};
 
-pub fn run() -> Result<()> {
+pub fn run(stop: &Arc<AtomicBool>) -> Result<()> {
     trace!("开始获取 sqllog 目录");
     let dir = get_sqllog_dir();
     trace!("获取到 sqllog 目录: {}", dir.display());
@@ -16,26 +25,21 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    let cfg = Config::load();
-    let _runtime = cfg.resolve_runtime();
-    let db_path = _runtime.db_path;
-    let chunk_size = _runtime.chunk_size;
-    let create_indexes = _runtime.create_indexes;
+    let runtime = Config::load();
+    let db_path = runtime.db_path;
 
     let start = Instant::now();
     let mut total_files = 0usize;
     let mut total_logs = 0usize;
     let mut error_files: Vec<(String, String)> = Vec::new();
-    let mut chunk: Vec<Sqllog> = Vec::new();
 
     process_directory(
         &dir,
-        chunk_size,
         &db_path,
-        &mut chunk,
         &mut total_files,
         &mut total_logs,
         &mut error_files,
+        stop,
     )?;
 
     let elapsed = start.elapsed();
@@ -48,25 +52,46 @@ pub fn run() -> Result<()> {
     );
     write_error_files(&error_files)?;
 
-    flush_chunk_if_needed(&db_path, &mut chunk)?;
+    // 导出（可选，由配置控制）
+    if runtime.export_enabled {
+        let out_path = if let Some(p) = runtime.export_out_path.as_ref() {
+            p.clone()
+        } else {
+            // derive filename from db_path, e.g. sqllogs.duckdb -> sqllogs_export.<ext>
+            let pb = std::path::PathBuf::from(&db_path);
+            let stem =
+                pb.file_stem().and_then(|s| s.to_str()).unwrap_or("sqllogs");
+            let ext = match runtime.export_format.as_str() {
+                "json" => "json",
+                "excel" | "xlsx" => "xlsx",
+                _ => "csv",
+            };
+            pb.with_file_name(format!("{stem}_export.{ext}"))
+        };
 
-    if create_indexes {
-        create_indexes_and_report(&db_path, chunk_size)?;
+        // call the flags-aware exporter and forward runtime config values as COPY options
+        if let Err(e) = duckdb_writer::export_sqllogs_to_file_with_flags(
+            &db_path,
+            &out_path,
+            &runtime.export_format,
+            &runtime.export_options,
+        ) {
+            error!("导出 DuckDB 失败: {e}");
+        } else {
+            info!("导出完成: {}", out_path.display());
+        }
     }
 
     Ok(())
 }
 
-// load_config moved to `config::Config::resolve_runtime`
-
 fn process_directory(
     dir: &PathBuf,
-    chunk_size: usize,
     db_path: &str,
-    chunk: &mut Vec<Sqllog>,
     total_files: &mut usize,
     total_logs: &mut usize,
     error_files: &mut Vec<(String, String)>,
+    stop: &Arc<AtomicBool>,
 ) -> Result<()> {
     trace!("开始处理目录: {}", dir.display());
 
@@ -76,18 +101,27 @@ fn process_directory(
         if !path.is_file() {
             continue;
         }
+        if stop.load(Ordering::SeqCst) {
+            info!("停止标志被触发，提前结束目录处理");
+            break;
+        }
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("dmsql") && PathBuf::from(name).extension().is_some() {
+            // 匹配文件名：以 'dmsql' 开始并以 '.log' 结尾（不区分大小写）
+            let name_lower = name.to_lowercase();
+            if name_lower.starts_with("dmsql")
+                && std::path::Path::new(&name_lower)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("log"))
+            {
                 *total_files += 1;
                 process_file(
                     &path,
                     name,
-                    chunk_size,
                     db_path,
-                    chunk,
                     total_logs,
                     error_files,
-                )?;
+                    stop,
+                );
             }
         }
     }
@@ -98,70 +132,33 @@ fn process_directory(
 fn process_file(
     path: &PathBuf,
     name: &str,
-    chunk_size: usize,
     db_path: &str,
-    chunk: &mut Vec<Sqllog>,
     total_logs: &mut usize,
     error_files: &mut Vec<(String, String)>,
-) -> Result<()> {
+    stop: &Arc<AtomicBool>,
+) {
     trace!("开始解析文件: {name}");
     let file_start = Instant::now();
-    let (logs, formatted_errors) = process::parse_sqllog_file(path);
+    let (logs, formatted_errors) = parse_sqllog_file(path);
     let elapsed_file = file_start.elapsed();
     trace!("文件 {name} 解析耗时: {elapsed_file:.2?}");
     *total_logs += logs.len();
 
-    // stream in parsed logs
-    for rec in logs {
-        chunk.push(rec);
-        if chunk.len() >= chunk_size {
-            // flush chunk to duckdb
-            if let Err(e) = duckdb_writer::append_sqllogs_chunk(db_path, chunk) {
-                error!("流式写入 DuckDB 失败: {}", e);
-            }
-            chunk.clear();
+    // 将解析后的日志一次性追加到 DuckDB
+    if !logs.is_empty() {
+        if stop.load(Ordering::SeqCst) {
+            info!("停止标志被触发，跳过写入文件: {name}");
+            return;
+        }
+        if let Err(e) = duckdb_writer::write_sqllogs_to_duckdb(db_path, &logs) {
+            error!("写入 DuckDB 失败: {e}");
+        } else {
+            trace!("文件 {} 的 {} 条记录已写入 DuckDB", name, logs.len());
         }
     }
 
-    // collect any parse errors for later reporting
+    // 收集解析错误以便后续报告
     for (file, msg) in formatted_errors {
         error_files.push((file, msg));
     }
-
-    Ok(())
-}
-
-fn flush_chunk_if_needed(db_path: &str, chunk: &mut Vec<Sqllog>) -> Result<()> {
-    if !chunk.is_empty() {
-        if let Err(e) = duckdb_writer::append_sqllogs_chunk(db_path, chunk) {
-            error!("流式写入 DuckDB 失败: {}", e);
-        }
-        chunk.clear();
-    }
-    Ok(())
-}
-
-fn create_indexes_and_report(db_path: &str, chunk_size: usize) -> Result<()> {
-    trace!("开始创建索引并收集报告");
-    match duckdb_writer::write_sqllogs_to_duckdb_with_chunk_and_report(
-        db_path,
-        &[],
-        chunk_size,
-        true,
-    ) {
-        Ok(reports) => {
-            for r in reports {
-                if let Some(err) = r.error {
-                    error!("索引创建失败: {} -> {}", r.statement, err);
-                } else if let Some(ms) = r.elapsed_ms {
-                    info!("索引创建成功: {} ({} ms)", r.statement, ms);
-                } else {
-                    info!("索引创建完成但无耗时信息: {}", r.statement);
-                }
-            }
-        }
-        Err(e) => error!("创建索引失败: {}", e),
-    }
-
-    Ok(())
 }

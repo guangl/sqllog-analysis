@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub log: Option<LogSection>,
     pub database: Option<DatabaseSection>,
-    // testing section removed
+    pub export: Option<ExportSection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -17,109 +17,160 @@ pub struct LogSection {
 #[derive(Debug, Deserialize)]
 pub struct DatabaseSection {
     pub db_path: Option<String>,
-    pub chunk_size: Option<usize>,
-    pub create_indexes: Option<bool>,
 }
 
-// testing section removed: tests should use environment variables for failure injection
+#[derive(Debug, Deserialize)]
+pub struct ExportSection {
+    pub enabled: Option<bool>,
+    pub format: Option<String>,
+    pub out_path: Option<PathBuf>,
+    pub per_thread_out: Option<bool>,
+    pub overwrite_or_ignore: Option<bool>,
+    pub overwrite: Option<bool>,
+    pub append: Option<bool>,
+    pub file_size_bytes: Option<u64>,
+}
 
-/// Runtime-ready configuration values derived from `Config`.
+#[derive(Debug, Clone)]
+pub struct ExportOptions {
+    pub per_thread_out: bool,
+    pub write_flags: WriteFlags,
+    pub file_size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WriteFlags {
+    pub overwrite_or_ignore: bool,
+    pub overwrite: bool,
+    pub append: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub db_path: String,
-    pub chunk_size: usize,
-    pub create_indexes: bool,
     pub enable_stdout: bool,
     pub log_dir: Option<PathBuf>,
+    pub export_enabled: bool,
+    pub export_format: String,
+    pub export_out_path: Option<PathBuf>,
+    pub export_options: ExportOptions,
 }
 
 impl Config {
-    pub fn load() -> Self {
-        // Search order for config files (same as before)
-        let candidates = {
-            let mut v: Vec<PathBuf> = Vec::new();
+    #[must_use]
+    pub fn load() -> RuntimeConfig {
+        use std::env;
+        use std::fs;
 
-            // standard candidate locations (no environment overrides)
-            v.push(PathBuf::from("config").join("config.toml"));
-            v.push(PathBuf::from("config.toml"));
-            if let Some(home) = dirs::home_dir() {
-                v.push(
-                    home.join(".config")
-                        .join("sqllog-analysis")
-                        .join("config.toml"),
-                );
+        // Default empty config
+        let mut cfg = Self { log: None, database: None, export: None };
+
+        // Try loading config from: $SQLLOG_CONFIG, ./config.toml, or config_dir()/sqllog-analysis/config.toml
+        let config_path = (|| {
+            if let Ok(p) = env::var("SQLLOG_CONFIG") {
+                return Some(PathBuf::from(p));
             }
-            if cfg!(windows) {
-                // On Windows, also check ProgramData default location
-                v.push(
-                    PathBuf::from("C:")
-                        .join("ProgramData")
-                        .join("sqllog-analysis")
-                        .join("config.toml"),
-                );
-            } else {
-                v.push(
-                    PathBuf::from("/etc")
-                        .join("sqllog-analysis")
-                        .join("config.toml"),
-                );
-            }
-
-            v
-        };
-
-        for path in candidates {
-            if path.exists() {
-                if let Ok(s) = std::fs::read_to_string(&path) {
-                    if let Ok(cfg) = toml::from_str::<Config>(&s) {
-                        return cfg;
-                    }
+            if let Ok(cwd) = env::current_dir() {
+                let p = cwd.join("config.toml");
+                if p.exists() {
+                    return Some(p);
                 }
             }
+            if let Some(cfg_dir) = dirs::config_dir() {
+                let p = cfg_dir.join("sqllog-analysis").join("config.toml");
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+            None
+        })();
+
+        if let Some(path) = config_path {
+            match fs::read_to_string(&path) {
+                Ok(contents) => match toml::from_str::<Config>(&contents) {
+                    Ok(parsed) => {
+                        cfg = parsed;
+                        log::info!("使用配置文件: {}", path.display());
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "解析配置文件失败 {}: {}",
+                            path.display(),
+                            e
+                        );
+                        // treat parse errors as fatal: misconfigured input
+                        std::process::exit(2);
+                    }
+                },
+                Err(e) => {
+                    log::warn!("读取配置文件失败 {}: {}", path.display(), e)
+                }
+            }
+        } else {
+            log::info!("未找到配置文件；使用默认运行时配置");
         }
 
-        // fallback: empty config (values will be resolved from defaults later)
-        Config {
-            log: None,
-            database: None,
-        }
-    }
-
-    /// Resolve runtime configuration values with precedence: config file -> env vars -> defaults.
-    pub fn resolve_runtime(&self) -> RuntimeConfig {
-        // database values
-        let db_path = self
+        // Merge with defaults
+        let db_path = cfg
             .database
             .as_ref()
             .and_then(|d| d.db_path.clone())
             .unwrap_or_else(|| "sqllogs.duckdb".into());
 
-        let chunk_size = self
-            .database
-            .as_ref()
-            .and_then(|d| d.chunk_size)
-            .unwrap_or(1000);
-
-        let create_indexes = self
-            .database
-            .as_ref()
-            .and_then(|d| d.create_indexes)
-            .unwrap_or(true);
-
-        // log values
-        let enable_stdout = self
+        let enable_stdout = cfg
             .log
             .as_ref()
             .and_then(|l| l.enable_stdout)
             .unwrap_or(cfg!(debug_assertions));
 
-        let log_dir = self.log.as_ref().and_then(|l| l.log_dir.clone());
+        let log_dir = cfg.log.as_ref().and_then(|l| l.log_dir.clone());
+
+        let export_enabled =
+            cfg.export.as_ref().and_then(|e| e.enabled).unwrap_or(false);
+
+        let export_format = cfg
+            .export
+            .as_ref()
+            .and_then(|e| e.format.clone())
+            .unwrap_or_else(|| "csv".into());
+
+        let export_out_path =
+            cfg.export.as_ref().and_then(|e| e.out_path.clone());
+
+        let export_per_thread_out =
+            cfg.export.as_ref().and_then(|e| e.per_thread_out).unwrap_or(false);
+
+        let export_overwrite_or_ignore = cfg
+            .export
+            .as_ref()
+            .and_then(|e| e.overwrite_or_ignore)
+            .unwrap_or(false);
+
+        let export_overwrite =
+            cfg.export.as_ref().and_then(|e| e.overwrite).unwrap_or(false);
+        let export_append =
+            cfg.export.as_ref().and_then(|e| e.append).unwrap_or(false);
+        let export_file_size_bytes =
+            cfg.export.as_ref().and_then(|e| e.file_size_bytes);
+
+        let export_options = ExportOptions {
+            per_thread_out: export_per_thread_out,
+            write_flags: WriteFlags {
+                overwrite_or_ignore: export_overwrite_or_ignore,
+                overwrite: export_overwrite,
+                append: export_append,
+            },
+            file_size_bytes: export_file_size_bytes,
+        };
 
         RuntimeConfig {
             db_path,
-            chunk_size,
-            create_indexes,
             enable_stdout,
             log_dir,
+            export_enabled,
+            export_format,
+            export_out_path,
+            export_options,
         }
     }
 }

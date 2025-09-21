@@ -14,7 +14,7 @@ fn test_main_dir_not_exist() {
     let dir = tmp.path().join("not_exist_dir");
     assert!(!dir.exists());
     let result = panic::catch_unwind(|| {
-        let _ = {
+        let () = {
             let sqllog_dir = &dir;
             if !sqllog_dir.exists() {
                 println!("未找到 sqllog 目录，请确认目录是否存在");
@@ -36,8 +36,14 @@ fn test_main_no_log_files() {
         for entry in fs::read_dir(sqllog_dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_file() {
-                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                    if filename.starts_with("dmsql") && filename.ends_with(".log") {
+                if let Some(filename) =
+                    path.file_name().and_then(|n| n.to_str())
+                {
+                    if filename.starts_with("dmsql")
+                        && std::path::Path::new(filename)
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("log"))
+                    {
                         println!("处理文件: {}", filename);
                     }
                 }
@@ -60,9 +66,14 @@ fn test_main_parse_success_and_error() {
         for entry in fs::read_dir(sqllog_dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_file() {
-                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                    if filename.starts_with("dmsql") && filename.ends_with(".log") {
-                        let (logs, errors) = Sqllog::from_file_with_errors(&path);
+                if let Some(filename) =
+                    path.file_name().and_then(|n| n.to_str())
+                {
+                    if filename.starts_with("dmsql")
+                        && filename.ends_with(".log")
+                    {
+                        let (logs, errors) =
+                            Sqllog::from_file_with_errors(&path);
                         println!(
                             "成功解析文件: {}，共 {} 条记录，{} 条错误",
                             filename,
