@@ -20,11 +20,16 @@ format = "csv"
 out_path = "exports/out.csv"
 # 是否按线程分别输出（与 DuckDB COPY 的 PER_THREAD_OUTPUT 对应）
 per_thread_out = false
-
 # 导出写入模式的 flags（见下方说明）
 overwrite_or_ignore = false
 overwrite = false
 append = false
-
 # 可选：单个导出文件的最大字节数（例如 100 MiB）
 file_size_bytes = 104857600
+
+# sqllog 相关配置
+[sqllog]
+# sqllog 目录，支持相对路径或绝对路径。
+# 如果在配置中未指定，则默认使用相对目录 "sqllog"（即程序运行目录下的 sqllog/）。
+# 如果你想把 sqllog 文件放在其他位置，请在此处设置绝对或相对路径。
+sqllog_dir = "sqllog"

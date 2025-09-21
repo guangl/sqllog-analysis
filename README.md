@@ -12,22 +12,19 @@
 - 默认日志文件名为 `sqllog-analysis-YYYY-MM-DD.log`，其中 `YYYY-MM-DD` 为程序启动当天的日期。
 - 同时日志也会输出到终端（stdout），方便交互或 CI 时直接查看。
 
-可用命令行参数：
+日志行为现在由配置文件中的 `[log]` 节控制（请编辑 `config.toml` 或 `config.toml.example`）：
 
-- `--log-file=<path>`：指定日志文件或日志目录。如果传入目录，程序会在该目录下创建默认文件名；也可以传入完整文件路径。
-- `--no-log`：禁用日志输出（文件与终端）。
-- `--log-level=<level>`：指定日志等级（error、warn、info、debug、trace）。默认 `info`。
+- `enable_stdout`：是否将日志同时输出到终端（stdout）。在未显式设置时，调试构建下通常为开启；在发布构建请显式设置为 `true` 或 `false`。
+- `log_dir`：日志文件所在目录（相对或绝对路径），程序会在该目录写入按日期命名的日志文件。
 
-示例：
+示例（`config.toml` 中的 `[log]` 节）：
 
-```powershell
-# 使用默认 logs 目录
-.\sqllog-analysis.exe --input-file logs/example.log
-
-.\sqllog-analysis.exe --log-file D:\mylogs --input-file logs/example.log
-.\sqllog-analysis.exe --log-file D:\mylogs\my-sqllog.log --input-file logs/example.log
-
-# 关闭日志
+```toml
+[log]
+# 是否在 stdout 打印日志（true/false）
+enable_stdout = true
+# 日志目录，支持相对路径或绝对路径
+log_dir = "logs"
 ```
 
 注意事项：
@@ -55,50 +52,23 @@ Sep 20 12:35:03 ERROR sqllog_analysis: 读取文件 failed.log: IO错误: No suc
 
 这些日志行也会写入默认的日志文件 `logs/sqllog-analysis-YYYY-MM-DD.log`，便于长期保存与分析。
 
-## DuckDB 写入器（duckdb_writer）
+## sqllog 目录配置
 
-仓库包含一个将解析后的 `Sqllog` 记录写入 DuckDB 的写入器，使用 DuckDB 的 Appender API 进行批量插入以提高性能。
+新增的 `[sqllog]` 配置节用于指定 sqllog 文件存放目录：
 
-主要 API（位于 crate 根的 `duckdb_writer` 模块）：
+- `sqllog_dir`：sqllog 目录路径，支持相对路径或绝对路径。
 
-- `write_sqllogs_to_duckdb<P: AsRef<Path>>(db_path: P, records: &[Sqllog]) -> Result<()>`：将记录批量写入指定的 DuckDB 数据库文件。当前实现不使用外部 chunk 流式写入，而通过 DuckDB Appender 批量插入提高性能。
+优先级与回退规则：
 
-注意：早期版本包含基于 chunk 的分块写入与索引创建报告的 API（例如 `write_sqllogs_to_duckdb_with_chunk_and_report`），这些接口已被简化或移除。如需历史实现或索引创建报告，请参阅变更日志（CHANGELOG.md）或在 issue 中提出请求。
+1. 如果在配置文件（或通过环境/CLI）指定了 `[sqllog].sqllog_dir`，程序将使用该路径。
+2. 否则，程序会尝试从 `[database].db_path` 推导父目录作为 sqllog 目录。
+3. 如果仍然无法推导（例如 `db_path` 为空或没有父目录），程序将使用相对目录 `sqllog`（即运行目录下的 `sqllog/`）。
 
-如何运行注入式失败测试（无需额外环境变量）
+示例（config.toml 中）：
 
-项目提供了测试 helper 用于在集成测试中注入失败，用以验证错误处理逻辑。示例：`tests/duckdb_index_failure.rs` 中通过调用：
-
-```rust
-// 在测试开始处启用注入
-sqllog_analysis::duckdb_writer::set_inject_bad_index(true);
-
-// 运行测试（本地或 CI）
-// 这会触发已注入的失败语句并验证 IndexReport 的错误处理逻辑
-// 在 CI 中可以直接运行：
-// cargo test --test duckdb_index_failure -- --nocapture
+```toml
+[sqllog]
+sqllog_dir = "sqllog"
 ```
 
-通常 CI 不需要额外环境变量；只需在 CI job 中运行相应测试即可。若确实需要仿真等效的外部注入（仅在特殊验证场景），可以采用自定义脚本或额外的测试 binary，但默认建议使用 crate 提供的测试 helper。
-
-注意：索引通常在批量插入之后创建以获得更佳插入性能。若需在索引创建失败时回滚整个批次，或希望将索引创建改为一次性原子操作，可在调用处实现更高层的事务控制或调整写入器行为（当前实现为每个索引独立短事务，并在 `IndexReport` 中报告失败）。
-
-示例（Rust 片段）：
-
-```rust
-use sqllog_analysis::duckdb_writer;
-
-fn write_and_report(db_path: &str, records: &[Sqllog]) -> anyhow::Result<()> {
-    // chunk_size = 500, create indexes = true
-    let reports = duckdb_writer::write_sqllogs_to_duckdb_with_chunk_and_report(db_path, records, 500, true)?;
-
-    for r in reports {
-        match r.error {
-            Some(err) => eprintln!("index '{}' failed: {}", r.statement, err),
-            None => println!("index '{}' created in {:?} ms", r.statement, r.elapsed_ms),
-        }
-    }
-
-    Ok(())
-}
-```
+说明：将 `sqllog_dir` 设置为 `"sqllog"` 是默认且推荐的简单用法，适合在同一目录下管理日志与解析数据的场景。若需要把 sqllog 存放在集中日志服务器或不同分区，请使用绝对路径。

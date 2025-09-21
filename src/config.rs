@@ -1,11 +1,12 @@
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::{env, fs, path::PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub log: Option<LogSection>,
     pub database: Option<DatabaseSection>,
     pub export: Option<ExportSection>,
+    pub sqllog: Option<SqllogSection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +32,11 @@ pub struct ExportSection {
     pub file_size_bytes: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SqllogSection {
+    pub sqllog_dir: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ExportOptions {
     pub per_thread_out: bool,
@@ -50,6 +56,7 @@ pub struct RuntimeConfig {
     pub db_path: String,
     pub enable_stdout: bool,
     pub log_dir: Option<PathBuf>,
+    pub sqllog_dir: Option<PathBuf>,
     pub export_enabled: bool,
     pub export_format: String,
     pub export_out_path: Option<PathBuf>,
@@ -59,11 +66,9 @@ pub struct RuntimeConfig {
 impl Config {
     #[must_use]
     pub fn load() -> RuntimeConfig {
-        use std::env;
-        use std::fs;
-
         // Default empty config
-        let mut cfg = Self { log: None, database: None, export: None };
+        let mut cfg =
+            Self { log: None, database: None, export: None, sqllog: None };
 
         // Try loading config from: $SQLLOG_CONFIG, ./config.toml, or config_dir()/sqllog-analysis/config.toml
         let config_path = (|| {
@@ -87,7 +92,7 @@ impl Config {
 
         if let Some(path) = config_path {
             match fs::read_to_string(&path) {
-                Ok(contents) => match toml::from_str::<Config>(&contents) {
+                Ok(contents) => match toml::from_str::<Self>(&contents) {
                     Ok(parsed) => {
                         cfg = parsed;
                         log::info!("使用配置文件: {}", path.display());
@@ -103,7 +108,7 @@ impl Config {
                     }
                 },
                 Err(e) => {
-                    log::warn!("读取配置文件失败 {}: {}", path.display(), e)
+                    log::warn!("读取配置文件失败 {}: {}", path.display(), e);
                 }
             }
         } else {
@@ -163,10 +168,17 @@ impl Config {
             file_size_bytes: export_file_size_bytes,
         };
 
+        let sqllog_dir = cfg
+            .sqllog
+            .as_ref()
+            .and_then(|s| s.sqllog_dir.clone())
+            .or_else(|| Some(PathBuf::from("sqllog")));
+
         RuntimeConfig {
             db_path,
             enable_stdout,
             log_dir,
+            sqllog_dir,
             export_enabled,
             export_format,
             export_out_path,
