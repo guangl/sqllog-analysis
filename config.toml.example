@@ -5,21 +5,21 @@
 enable_stdout = true
 # 日志目录
 log_dir = "logs"
- # 日志等级：error/warn/info/debug/trace/off
- level = "info"
+# 日志等级：error/warn/info/debug/trace/off
+level = "info"
 
 [database]
 # DuckDB 数据库文件路径
 db_path = "sqllogs.duckdb"
 
 [export]
-# 是否启用导出
-enabled = true
-# 导出格式：csv/json/excel
+# 是否启用导出（功能开发中，当前无效）
+enabled = false
+# 导出格式：csv/json/excel（待实现）
 format = "csv"
-# 导出目标路径
+# 导出目标路径（待实现）
 out_path = "exports/out.csv"
-# 是否按线程输出
+# 是否按线程输出（待实现）
 per_thread_out = false
 
 # 写入选项（overwrite_or_ignore / overwrite / append）
@@ -45,6 +45,12 @@ file_size_bytes = 104857600
 # 当未提供时，程序默认使用相对目录 "sqllog"（即运行目录下的 sqllog/）。
 [sqllog]
 sqllog_dir = "sqllog"
+# 解析器线程数量（默认：10）
+parser_threads = 10
+# 是否将解析失败的行写入错误文件（默认：false）
+write_errors = true
+# 错误输出文件路径（默认：parse_errors.log）
+errors_out_path = "parse_errors.jsonl"
 # 可选：按解析出的记录数分块处理日志文件，每当解析出指定数量的条目时会触发一次处理回调。
 # 如果设置为 0 或者省略，则表示禁用分块（一次性解析完整文件）。
 # chunk_size = 1000

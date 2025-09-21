@@ -1,5 +1,5 @@
+use crate::sqllog::types::{self, SqllogError};
 use std::{borrow::Cow, str};
-use crate::sqllog::types::SqllogError;
 
 /// 判断年份是否为闰年
 #[must_use]
@@ -72,7 +72,7 @@ pub fn is_first_row(s: &str) -> bool {
     }
 
     // 获取每月最大天数
-    let mut max_days = crate::sqllog::types::DAYS_IN_MONTH[month as usize - 1];
+    let mut max_days = types::DAYS_IN_MONTH[month as usize - 1];
     if month == 2 && is_leap_year(year) {
         max_days += 1;
     }
@@ -92,6 +92,12 @@ pub fn is_first_row(s: &str) -> bool {
     hour <= 23 && minute <= 59 && second <= 59
 }
 
+/// 在给定字符串中查找第一个符合首行时间戳格式的位置（返回起始索引）。
+///
+/// 参数：
+/// - `s`：待搜索的字符串（可能包含多行）。
+///
+/// 返回：找到则返回 `Some(index)`，否则返回 `None`。
 #[must_use]
 pub fn find_first_row_pos(s: &str) -> Option<usize> {
     if s.len() < 23 {
@@ -100,6 +106,19 @@ pub fn find_first_row_pos(s: &str) -> Option<usize> {
     (0..=s.len().saturating_sub(23)).find(|&i| is_first_row(&s[i..i + 23]))
 }
 
+/// 将读取到的字节转换为字符串（尽可能为 Borrowed），并在遇到无效 UTF-8 时记录错误。
+///
+/// 行为说明：
+/// - 如果字节序列是有效的 UTF-8，则返回 `Cow::Borrowed(&str)`，避免额外分配。
+/// - 若遇到无效 UTF-8，会将错误以 `(line_num, brief_msg, SqllogError::Utf8(_))` 的形式添加到 `errors`，
+///   并返回一个经过修复与重同步的 owned `String`（`Cow::Owned`）。
+///
+/// 参数：
+/// - `line_bytes`：原始行字节切片（可能包含换行符）。
+/// - `line_num`：当前行号（用于错误记录）。
+/// - `errors`：用于收集解析期间遇到的错误条目。
+///
+/// 返回：`Cow<'a, str>`，在无错误时尽量返回 Borrowed，否则返回 Owned。
 pub fn line_bytes_to_str_impl<'a>(
     line_bytes: &'a [u8],
     line_num: usize,
@@ -111,7 +130,8 @@ pub fn line_bytes_to_str_impl<'a>(
             // 更保守的错误记录：仅记录总长度和前缀（最多 8 字节）以避免日志膨胀
             let prefix_len = 8usize.min(line_bytes.len());
             let prefix = &line_bytes[..prefix_len];
-            let mut err_msg = format!("len={} prefix={:?}", line_bytes.len(), prefix);
+            let mut err_msg =
+                format!("len={} prefix={:?}", line_bytes.len(), prefix);
             if prefix_len < line_bytes.len() {
                 err_msg.push_str("...");
             }
@@ -120,9 +140,8 @@ pub fn line_bytes_to_str_impl<'a>(
             // 使用 lossy 转换得到 owned String，可就地重同步以避免额外分配
             let mut s = String::from_utf8_lossy(line_bytes).into_owned();
             // 裁剪开头的空格/制表符和可能来自无效 UTF-8 序列的替换字符。
-            let trimmed_start = s
-                .trim_start_matches(&[' ', '\t', '\u{FFFD}'][..])
-                .to_string();
+            let trimmed_start =
+                s.trim_start_matches(&[' ', '\t', '\u{FFFD}'][..]).to_string();
             // 如果 trim 改变了内容，直接使用 trimmed_start
             if trimmed_start.len() != s.len() {
                 s = trimmed_start;

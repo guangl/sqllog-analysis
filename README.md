@@ -1,29 +1,276 @@
-# sqllog 分析
+# sqllog 分析# sqllog 分析
 
-[![Release v0.2.1](https://img.shields.io/badge/release-v0.2.1-blue)](https://github.com/guangl/sqllog-analysis/releases/tag/v0.2.1) [![Rust Tests](https://github.com/guangl/sqllog-analysis/actions/workflows/rust.yml/badge.svg)](https://github.com/guangl/sqllog-analysis/actions/workflows/rust.yml)
 
-本工具用于分析达梦数据库产生的 sqllog 文件。它可读取日志文件、将解析结果导入 DuckDB 以便后续分析（例如导出事务相关信息）。
 
-## TODO
+[![Release v0.4.0](https://img.shields.io/badge/release-v0.4.0-blue)](https://github.com/guangl/sqllog-analysis/releases/tag/v0.4.0) [![Rust Tests](https://github.com/guangl/sqllog-analysis/actions/workflows/rust.yml/badge.svg)](https://github.com/guangl/sqllog-analysis/actions/workflows/rust.yml)[![Release v0.3.0](https://img.shields.io/badge/release-v0.3.0-blue)](https://github.com/guangl/sqllog-analysis/releases/tag/v0.3.0) [![Rust Tests](https://github.com/guangl/## 导出配置说明（开发中）
+
+
+
+本工具用于分析达梦数据库产生的 sqllog 文件。它可以解析日志文件、验证格式，并收集解析错误用于诊断。> **⚠️ 注注意和变更说明：
+
+
+
+> **⚠️ 开发状态**：DuckDB 数据存储和导出功能正在开发中。当前版本主要提供 sqllog 文件解析和错误诊断功能。- `export.file_size_bytes` 不能设置为 `0`。如果在配置文件中设置为 `0`，程序在启动时会视为配置错误并以非零退出码终止。要表示"无上限"，请删除该项或注释掉它。
+
+- **数据库导出功能开发中**：当前版本只解析 sqllog 文件，不会创建 DuckDB 数据库或导出数据。导出相关配置已预留，待后续版本实现。
+
+## ✨ 新功能 (v0.4.0)
+
+## 性能基准测试
+
+### 停止控制
+
+- **Ctrl-C 支持**：程序运行时按 Ctrl-C 可优雅停止所有解析任务本仓库包含性能基准测试：
+
+- **交互式停止**：在交互式终端中输入 "stop" 并回车也可停止程序
+
+- **并发安全**：所有工作线程会在收到停止信号后安全退出```powershell
+
+# 运行 sqllog 解析性能基准
+
+### 解析错误收集cargo bench --bench sqllog_bench
+
+- **错误写入功能**：可配置将解析失败的日志行写入单独的错误文件
+
+- **JSONL 格式**：错误信息以 JSON Lines 格式保存，便于后续分析# 运行日期时间解析性能基准
+
+- **线程安全**：使用专用写入线程，避免主解析流程阻塞cargo bench --bench datetime_bench
+
+```
+
+### 代码质量提升
+
+- **零 Clippy 警告**：代码通过严格的 Clippy 检查（all + pedantic + nursery + cargo）当前基准测试主要测量：
+
+- **函数重构**：拆分长函数，提高代码可读性和可维护性- sqllog 文件解析性能
+
+- **中文文档**：添加详细的中文注释和文档- 日期时间字符串解析性能
+
+
+
+## 使用说明> **计划中**：待 DuckDB 写入功能实现后，将添加数据库写入性能基准测试。已就绪，但实际的 DuckDB 数据导出功能尚未实现。
+
+
+
+### 基本运行在 `[export]` 节中可以设置 `file_size_bytes` 来指定单个导出文件的大小上限（以字节为单位）。注意：
+
+
+
+```powershell- `export.file_size_bytes` 不能设置为 0。配置为 `0` 会被视为配置错误，程序在启动时解析配置时会打印错误并以非零退出码退出。要表示"无上限"，请删除该项或不在配置中设置它；要限制大小，请设置为大于 0 的正整数。g-analysis/actions/workflows/rust.yml/badge.svg)](https://github.com/guangl/sqllog-analysis/actions/workflows/rust.yml)
+
+# 使用默认配置运行
+
+cargo run --release本工具用于分析达梦数据库产生的 sqllog 文件。它可以解析日志文件、验证格式，并收集解析错误用于诊断。
+
+
+
+# 或者直接运行编译后的程序> **⚠️ 开发状态**：DuckDB 数据存储和导出功能正在开发中。当前版本主要提供 sqllog 文件解析和错误诊断功能。
+
+./target/release/sqllog-analysis.exe
+
+```## ✨ 新功能 (v0.3.0)
+
+
+
+### 停止程序### 停止控制
+
+- **Ctrl-C 支持**：程序运行时按 Ctrl-C 可优雅停止所有解析任务
+
+程序提供多种停止方式：- **交互式停止**：在交互式终端中输入 "stop" 并回车也可停止程序
+
+- **并发安全**：所有工作线程会在收到停止信号后安全退出
+
+1. **Ctrl-C**：在程序运行时按 `Ctrl-C` 可优雅停止
+
+2. **交互式停止**：在交互式终端中输入 "stop" 并按回车### 解析错误收集
+
+3. **自动完成**：当所有文件处理完成后程序会自动退出- **错误写入功能**：可配置将解析失败的日志行写入单独的错误文件
+
+- **JSONL 格式**：错误信息以 JSON Lines 格式保存，便于后续分析
+
+### 错误诊断- **线程安全**：使用专用写入线程，避免主解析流程阻塞
+
+
+
+如果启用了错误写入功能（`write_errors = true`），您可以检查错误文件来诊断解析问题：### 代码质量提升
+
+- **零 Clippy 警告**：代码通过严格的 Clippy 检查（all + pedantic + nursery + cargo）
+
+```powershell- **函数重构**：拆分长函数，提高代码可读性和可维护性
+
+# 查看错误文件内容- **中文文档**：添加详细的中文注释和文档
+
+type parse_errors.jsonl
+
+## 使用说明
+
+# 统计错误数量
+
+(Get-Content parse_errors.jsonl).Count### 基本运行
+
+```
+
+```powershell
+
+## 配置说明# 使用默认配置运行
+
+cargo run --release
+
+### sqllog 配置
+
+# 或者直接运行编译后的程序
+
+```toml./target/release/sqllog-analysis.exe
+
+[sqllog]```
+
+# sqllog 文件目录
+
+sqllog_dir = "sqllog"### 停止程序
+
+# 解析器线程数量（默认：10）
+
+parser_threads = 10程序提供多种停止方式：
+
+# 是否写入解析错误到文件
+
+write_errors = true1. **Ctrl-C**：在程序运行时按 `Ctrl-C` 可优雅停止
+
+# 错误输出文件路径   - 所有正在进行的解析任务会安全完成当前文件
+
+errors_out_path = "parse_errors.jsonl"   - 数据库连接会正确关闭
+
+```   - 临时文件会被清理
+
+
+
+### 解析错误收集功能2. **交互式停止**：在交互式终端中输入 "stop"
+
+   ```
+
+当启用 `write_errors = true` 时，程序会将无法解析的 sqllog 行保存到指定的错误文件中，格式为 JSONL（每行一个 JSON 对象）：   正在处理文件...
+
+   stop  [按回车]
+
+```json   收到停止信号，正在安全退出...
+
+{"path":"sqllog/test.log","line":42,"error":"Invalid datetime format","raw":"malformed log line..."}   ```
+
+{"path":"sqllog/test.log","line":43,"error":"Missing required field","raw":"incomplete log entry"}
+
+```3. **自动完成**：当所有文件处理完成后程序会自动退出
+
+
+
+## TODO### 错误诊断
+
+
+
+目前需要的功能有：如果启用了错误写入功能（`write_errors = true`），您可以检查错误文件来诊断解析问题：
+
+- [x] 多线程并发分析 sqllog，每个文件都有一个线程用来分析（线程数量可以配置）
+
+- [ ] **多线程并发插入到 duckdb 中的 sqllogs 表里面**```powershell
+
+- [ ] **duckdb 可以导出成 excel/csv/json（导出类型可以配置）**# 查看错误文件内容
+
+- [ ] **duckdb 可以使用内存数据库或者磁盘数据库**type parse_errors.jsonl
+
+- [x] 支持 Ctrl-C 和交互式停止
+
+- [x] 解析错误收集和导出功能# 统计错误数量
+
+(Get-Content parse_errors.jsonl).Count
+
+### ⚠️ 重要说明
+
+# 使用 jq 分析错误类型（需要安装 jq）
+
+**DuckDB 数据库功能尚未完成**：type parse_errors.jsonl | jq '.error' | sort | uniq -c
+
+- ✅ DuckDB 依赖和配置已添加```
+
+- ✅ 数据库路径配置已实现  
+
+- ❌ **实际的数据库连接和数据插入功能尚未实现**## TODO
+
+- ❌ **数据导出功能尚未实现**
 
 目前需要的功能有
-- [ ] 多线程并发分析 sqllog，每个文件都有一个线程用来分析（线程数量可以配置）；
-- [ ] 多线程并发插入到 duckdb 中的 sqllogs 表里面；
-- [ ] duckdb 可以导出成 excel/csv/json（导出类型可以配置）；
-- [ ] duckdb 可以使用内存数据库或者磁盘数据库；
 
-## 日志（Logging）
+目前程序只能：- [x] 多线程并发分析 sqllog，每个文件都有一个线程用来分析（线程数量可以配置）；
+
+1. 解析 sqllog 文件并验证格式- [ ] **多线程并发插入到 duckdb 中的 sqllogs 表里面**；
+
+2. 收集解析错误到 JSONL 文件- [ ] **duckdb 可以导出成 excel/csv/json（导出类型可以配置）**；
+
+3. 支持优雅停止（Ctrl-C 或交互式 "stop"）- [ ] **duckdb 可以使用内存数据库或者磁盘数据库**；
+
+- [x] 支持 Ctrl-C 和交互式停止
+
+## 技术特性- [x] 解析错误收集和导出功能
+
+
+
+### 性能优化### ⚠️ 重要说明
+
+- **并行处理**：使用 rayon 线程池并行解析多个 sqllog 文件
+
+- **异步日志**：使用 tracing 的非阻塞写入器，避免 I/O 阻塞主线程**DuckDB 数据库功能尚未完成**：
+
+- **专用错误写入线程**：错误收集使用单独线程和 channel，避免解析线程阻塞- ✅ DuckDB 依赖和配置已添加
+
+- ✅ 数据库路径配置已实现
+
+### 并发安全- ❌ **实际的数据库连接和数据插入功能尚未实现**
+
+- **原子停止标志**：使用 Arc<AtomicBool> 实现线程安全的停止控制- ❌ **数据导出功能尚未实现**
+
+- **信号处理**：注册 Ctrl-C 处理器，支持优雅停止
+
+- **无锁设计**：错误写入使用 channel 而非锁，避免争用目前程序只能：
+
+1. 解析 sqllog 文件并验证格式
+
+### 代码质量2. 收集解析错误到 JSONL 文件
+
+- **零警告**：通过最严格的 Clippy 检查（all + pedantic + nursery + cargo）3. 支持优雅停止（Ctrl-C 或交互式 "stop"）
+
+- **函数式设计**：拆分长函数，提高可读性和可维护性
+
+- **错误处理**：完整的错误链传播和用户友好的错误信息**下一步开发计划**：
+
+1. 实现 DuckDB 数据库连接管理
+
+## 性能基准测试2. 添加解析数据到数据库的插入逻辑
+
+3. 实现多格式数据导出功能（CSV/JSON/Excel）
+
+```powershell
+
+# 运行 sqllog 解析性能基准## 日志（Logging）
+
+cargo bench --bench sqllog_bench
 
 本项目使用 `tracing` / `tracing-subscriber` 进行日志记录。
 
-- 默认会把日志写入当前工作目录下的 `logs/` 目录（若目录不存在会尝试创建）。
-- 默认日志文件名为 `sqllog-analysis-YYYY-MM-DD.log`，其中 `YYYY-MM-DD` 为程序启动当天的日期。
+# 运行日期时间解析性能基准  
+
+cargo bench --bench datetime_bench- 默认会把日志写入当前工作目录下的 `logs/` 目录（若目录不存在会尝试创建）。
+
+```- 默认日志文件名为 `sqllog-analysis-YYYY-MM-DD.log`，其中 `YYYY-MM-DD` 为程序启动当天的日期。
+
 - 同时日志也会输出到终端（stdout），方便交互或 CI 时直接查看。
 
-日志行为现在由配置文件中的 `[log]` 节控制（请编辑 `config.toml` 或 `config.toml.example`）：
+当前基准测试主要测量：
+
+- sqllog 文件解析性能日志行为现在由配置文件中的 `[log]` 节控制（请编辑 `config.toml` 或 `config.toml.example`）：
+
+- 日期时间字符串解析性能
 
 - `enable_stdout`：是否将日志同时输出到终端（stdout）。在未显式设置时，调试构建下通常为开启；在发布构建请显式设置为 `true` 或 `false`。
-- `log_dir`：日志文件所在目录（相对或绝对路径），程序会在该目录写入按日期命名的日志文件。
+
+> **计划中**：待 DuckDB 写入功能实现后，将添加数据库写入性能基准测试。- `log_dir`：日志文件所在目录（相对或绝对路径），程序会在该目录写入按日期命名的日志文件。
 
 示例（`config.toml` 中的 `[log]` 节）：
 
@@ -62,9 +309,26 @@ Sep 20 12:35:03 ERROR sqllog_analysis: 读取文件 failed.log: IO错误: No suc
 
 ## sqllog 目录配置
 
-新增的 `[sqllog]` 配置节用于指定 sqllog 文件存放目录：
+新增的 `[sqllog]` 配置节用于指定 sqllog 文件存放目录和错误处理：
 
 - `sqllog_dir`：sqllog 目录路径，支持相对路径或绝对路径。
+- `write_errors`：是否将解析失败的行写入错误文件（默认：false）
+- `errors_out_path`：错误输出文件路径（默认：parse_errors.log）
+
+### 解析错误收集功能
+
+当启用 `write_errors = true` 时，程序会将无法解析的 sqllog 行保存到指定的错误文件中，格式为 JSONL（每行一个 JSON 对象）：
+
+```json
+{"path":"sqllog/test.log","line":42,"error":"Invalid datetime format","raw":"malformed log line..."}
+{"path":"sqllog/test.log","line":43,"error":"Missing required field","raw":"incomplete log entry"}
+```
+
+每个错误记录包含：
+- `path`：源文件路径
+- `line`：出错的行号
+- `error`：具体错误描述
+- `raw`：原始日志行内容
 
 优先级与回退规则：
 
@@ -76,7 +340,12 @@ Sep 20 12:35:03 ERROR sqllog_analysis: 读取文件 failed.log: IO错误: No suc
 
 ```toml
 [sqllog]
+# sqllog 文件目录
 sqllog_dir = "sqllog"
+# 是否写入解析错误到文件
+write_errors = true
+# 错误输出文件路径
+errors_out_path = "parse_errors.jsonl"
 ```
 
 说明：将 `sqllog_dir` 设置为 `"sqllog"` 是默认且推荐的简单用法，适合在同一目录下管理日志与解析数据的场景。若需要把 sqllog 存放在集中日志服务器或不同分区，请使用绝对路径。
@@ -121,3 +390,27 @@ cargo bench --bench duckdb_write_bench
 ```
 
 基准会在多个规模下测量（例如 10k, 50k, 200k 条记录），并输出 Criterion 的报告。下面我会运行基准并把结果绘制为 PNG 图表以便直观比较。
+
+## 🔧 技术特性
+
+### 性能优化
+- **并行处理**：使用 rayon 线程池并行解析多个 sqllog 文件
+- **异步日志**：使用 tracing 的非阻塞写入器，避免 I/O 阻塞主线程
+- **专用错误写入线程**：错误收集使用单独线程和 channel，避免解析线程阻塞
+- **缓冲写入**：使用 BufWriter 提高文件写入性能
+
+### 并发安全
+- **原子停止标志**：使用 Arc<AtomicBool> 实现线程安全的停止控制
+- **信号处理**：注册 Ctrl-C 处理器，支持优雅停止
+- **无锁设计**：错误写入使用 channel 而非锁，避免争用
+
+### 代码质量
+- **零警告**：通过最严格的 Clippy 检查（all + pedantic + nursery + cargo）
+- **函数式设计**：拆分长函数，提高可读性和可维护性
+- **错误处理**：完整的错误链传播和用户友好的错误信息
+- **类型安全**：充分利用 Rust 类型系统避免运行时错误
+
+### 配置灵活性
+- **多层配置**：支持配置文件、环境变量和默认值
+- **路径智能解析**：自动处理相对路径和绝对路径
+- **格式多样**：支持 CSV、JSON、Excel 多种导出格式

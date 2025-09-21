@@ -372,16 +372,6 @@ fn test_appname_ip_none_and_empty() {
 }
 
 #[test]
-fn test_print_progress_no_panic() {
-    // 仅测试 print_progress 不 panic
-    let mut last_percent = 0u8;
-    Sqllog::print_progress(0, 100, &mut last_percent, "testfile.log");
-    Sqllog::print_progress(5, 100, &mut last_percent, "testfile.log");
-    Sqllog::print_progress(50, 100, &mut last_percent, "testfile.log");
-    Sqllog::print_progress(100, 100, &mut last_percent, "testfile.log");
-}
-
-#[test]
 fn test_from_line_parse_int_error() {
     // ep 字段非数字
     let line = "2025-10-10 10:10:10.100 (EP[abc] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) test";
@@ -496,6 +486,7 @@ fn test_from_file_with_errors_has_first_row_false() {
     writeln!(file, "not a valid log").unwrap();
     let (logs, errors) = parse_file_collect(&file_path);
     assert!(logs.is_empty());
+    println!("errors: {errors:?}");
     assert_eq!(errors.len(), 1);
     assert!(errors[0].2.to_string().contains("无有效日志行"));
 }
@@ -589,16 +580,6 @@ fn test_appname_ip_special_characters() {
     let log = Sqllog::from_line(line, 1).unwrap().unwrap();
     assert!(matches!(&log.appname, Some(s) if s.contains("!@# ip:!@#")));
     assert_eq!(log.ip, None);
-}
-
-#[test]
-fn test_print_progress_extreme_values() {
-    // print_progress 边界值（不测试溢出场景）
-    let mut last_percent = 0u8;
-    Sqllog::print_progress(0, 0, &mut last_percent, "testfile.log"); // total=0
-    Sqllog::print_progress(0, 100, &mut last_percent, "testfile.log"); // current=0
-    Sqllog::print_progress(100, 100, &mut last_percent, "testfile.log"); // current=total
-    Sqllog::print_progress(50, 100, &mut last_percent, "testfile.log"); // 正常值
 }
 
 #[test]

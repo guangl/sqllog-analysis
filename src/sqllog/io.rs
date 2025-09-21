@@ -1,14 +1,26 @@
-use crate::sqllog::types::{Sqllog, SqllogError};
-use std::io::{self, BufRead, BufReader};
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::doc_markdown)]
+
+use crate::sqllog::{
+    types::{Sqllog, SqllogError},
+    utils,
+};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+};
 
 impl Sqllog {
-    /// Parse the file and call `hook` when parsing completes or when a chunk boundary is reached.
+    /// 解析整个文件，并在解析出记录时通过 `hook` 回调发送记录片段。
     ///
-    /// # Errors
+    /// 参数说明：
+    /// - `path`: 要解析的文件路径。
+    /// - `hook`: 当解析出一组记录时被调用，接收记录切片 `&[Sqllog]`。
+    /// - `err_hook`: 当解析过程中遇到错误时被调用，接收错误列表 `&[(usize, String, SqllogError)]`。
     ///
-    /// Returns `Err(SqllogError::Io(_))` if the input file cannot be opened or read.
-    /// Parsing errors encountered during processing are reported via the `err_hook` callback
-    /// and do not cause this function to return `Err`.
+    /// 返回值：
+    /// - `Ok(())` 表示成功完成文件解析（解析错误通过 `err_hook` 上报，不会作为返回错误）。
+    /// - `Err(SqllogError::Io(_))` 表示在打开或读取文件时发生 I/O 错误。
     pub fn parse_all<P, F, EF>(
         path: P,
         hook: F,
@@ -19,24 +31,18 @@ impl Sqllog {
         F: FnMut(&[Self]),
         EF: FnMut(&[(usize, String, SqllogError)]),
     {
-        // Errors
-        //
-        // # Errors
-        //
-        // Returns `Err(SqllogError::Io(_))` if the input file cannot be opened or read.
-        // Parsing errors encountered during processing are reported via the `err_hook` callback
-        // and do not cause this function to return `Err`.
         Self::stream_parse(path, None, hook, err_hook)
     }
 
-    /// 解析文件并按块处理；当解析到 `chunk_size` 条记录时会调用 `hook`，hook 返回 `true` 表示继续，返回 `false` 表示提前终止解析。
-    /// Parse the file in chunks and call `hook` each time `chunk_size` records are parsed.
+    /// 按块解析文件，每次最多 `chunk_size` 条记录，并在每个块解析完成后调用 `hook`。
     ///
-    /// # Errors
+    /// 参数说明：
+    /// - `path`: 要解析的文件路径。
+    /// - `chunk_size`: 每次回调时包含的最大记录数。
+    /// - `hook`: 当收集到一块记录时被调用，接收记录切片 `&[Sqllog]`。
+    /// - `err_hook`: 当解析过程中遇到错误时被调用，接收错误列表 `&[(usize, String, SqllogError)]`。
     ///
-    /// Returns `Err(SqllogError::Io(_))` if the input file cannot be opened or read.
-    /// Parsing errors encountered during processing are reported via the `err_hook` callback
-    /// and do not cause this function to return `Err`.
+    /// 返回值与 `parse_all` 类似：I/O 错误会以 `Err(SqllogError::Io(_))` 返回，解析错误通过 `err_hook` 上报。
     pub fn parse_in_chunks<P, F, EF>(
         path: P,
         chunk_size: usize,
@@ -48,20 +54,22 @@ impl Sqllog {
         F: FnMut(&[Self]),
         EF: FnMut(&[(usize, String, SqllogError)]),
     {
-        // Errors
-        //
-        // # Errors
-        //
-        // Returns `Err(SqllogError::Io(_))` if the input file cannot be opened or read.
-        // Parsing errors encountered during processing are reported via the `err_hook` callback
-        // and do not cause this function to return `Err`.
         Self::stream_parse(path, Some(chunk_size), hook, err_hook)
     }
 
-    /// 从文件按块解析 sqllog，每当解析到 `chunk_size` 条记录或文件结尾时调用 `hook`。
-    /// hook: `FnMut(&[Sqllog])` — 对每个 chunk 调用，解析会一直进行到文件结束（hook 无法中止解析）。
-    /// 解析整个文件并返回所有解析出的 `Sqllog` 项与解析错误
-    // 通用的流式解析器：当 chunk_size == None 时，只在 EOF 调用 hook；否则每达到 chunk_size 调用一次
+    /// 流式解析实现（内部使用）。
+    ///
+    /// 该函数按行读取文件并逐行解析，内部维护解析状态并在必要时调用 `hook` 或 `err_hook`。
+    ///
+    /// 参数说明：
+    /// - `path`: 要解析的文件路径。
+    /// - `chunk_size`: 可选的块大小，若为 `Some(n)` 则在每 `n` 条记录时触发一次 `hook`。
+    /// - `hook`: 成功解析记录时的回调，接收记录切片 `&[Sqllog]`。
+    /// - `err_hook`: 解析发生错误时的回调，接收错误列表 `&[(usize, String, SqllogError)]`。
+    ///
+    /// 返回值：
+    /// - `Ok(())` 表示解析流程完成（解析错误会通过 `err_hook` 报告而不作为返回错误）。
+    /// - `Err(SqllogError::Io(_))` 表示在打开或读取文件时发生 I/O 错误。
     fn stream_parse<P, F, EF>(
         path: P,
         chunk_size: Option<usize>,
@@ -73,117 +81,98 @@ impl Sqllog {
         F: FnMut(&[Self]),
         EF: FnMut(&[(usize, String, SqllogError)]),
     {
-        // 初始化流处理状态
         let (file_name, total) = Self::init_stream_state(&path)?;
         log::trace!("开始处理文件: {file_name}");
-        // 若文件为空则正常返回（不视为错误）
         if total == 0 {
             return Ok(());
         }
 
-        let mut last_percent = 0u8;
-        let mut chunk = Vec::with_capacity(chunk_size.unwrap_or(1).max(1));
-        let mut chunk_errors: Vec<(usize, String, SqllogError)> = Vec::new();
-        let mut has_first_row = false;
+        let mut state = ParseState::new(chunk_size);
 
-        let mut content = String::new();
-        let mut line_num = 1usize;
-        let mut parsed_count: usize = 0;
-        let mut errors_total: usize = 0;
-
-        // 使用 read_file_lines，并将每行处理逻辑委派给 process_line_callback
         let path_clone = path.as_ref().to_path_buf();
-        let mut total_offset = 0usize;
-        let file_name_clone = file_name.clone();
-        // 开始计时
-        let start = std::time::Instant::now();
 
-        let mut per_line = |line: &[u8], n: usize| {
-            total_offset = total_offset.saturating_add(n);
-            Self::print_progress(
-                total_offset,
-                total,
-                &mut last_percent,
-                &file_name_clone,
-            );
-            Self::process_line_callback(
-                line,
-                &mut line_num,
-                &mut has_first_row,
-                &mut content,
-                &mut chunk,
-                &mut chunk_errors,
-                chunk_size,
-                &mut hook,
-                &mut err_hook,
-                &mut parsed_count,
-                &mut errors_total,
-            );
+        // 每读取一行字节后调用的闭包，会把字节传给 ParseState 进行处理
+        let mut per_line = |line: &[u8]| {
+            state.process_line_callback(line, &mut hook, &mut err_hook);
         };
 
         Self::read_file_lines(path_clone, &mut per_line)?;
 
-        // EOF 处理：计算耗时并传入
-        let elapsed = start.elapsed();
-        Self::finalize_at_eof(
-            &content,
-            line_num,
-            &mut chunk,
-            &mut chunk_errors,
-            &mut hook,
-            &mut err_hook,
-            has_first_row,
-        );
+        if !state.content.is_empty() {
+            Self::flush_content(
+                &state.content,
+                state.line_num,
+                &mut state.chunk,
+                &mut state.chunk_errors,
+            );
+        }
 
-        // 输出标准化完成信息
-        // 格式化耗时为更可读的字符串
-        let secs = elapsed.as_secs();
-        let millis = elapsed.as_millis() % 1000;
-        println!(
-            "\n解析完成: 文件 {file_name}，解析记录约 {parsed_count} 条，错误约 {errors_total} 条，耗时 {secs}.{millis:03} 秒"
-        );
+        // 如果从未遇到过首行，特殊处理并返回，避免重复上报同一错误。
+        if !state.has_first_row {
+            let has_critical = state.chunk_errors.iter().any(|(_, _, e)| {
+                matches!(
+                    e,
+                    SqllogError::Utf8(_)
+                        | SqllogError::Io(_)
+                        | SqllogError::Regex(_)
+                        | SqllogError::ParseInt(_)
+                )
+            });
+
+            if has_critical {
+                err_hook(&state.chunk_errors);
+            } else {
+                let err = SqllogError::Other("无有效日志行".to_string());
+                err_hook(&[(0usize, "无有效日志行".to_string(), err)]);
+            }
+
+            return Ok(());
+        }
+
+        state.finalize_at_eof(&mut hook, &mut err_hook);
 
         Ok(())
     }
 
-    // 清理 chunk 缓冲的辅助函数（仅做清理，无控制流）
-    fn flush_chunk<S>(
-        chunk: &mut Vec<S>,
-        chunk_errors: &mut Vec<(usize, String, SqllogError)>,
-    ) {
-        chunk.clear();
-        chunk_errors.clear();
-    }
-
-    // 按字节逐行读取文件的辅助函数并调用回调
-    // 回调 cb 接收已裁剪的行字节和本次读取的字节数 (n)，用于累计进度显示
+    /// 以行为单位读取文件，并将每行字节（包含换行符）传递给 `cb` 回调。
+    ///
+    /// 参数说明：
+    /// - `path`: 要读取的文件路径。
+    /// - `cb`: 接收裁剪后的行字节切片 `&[u8]` 的回调。
+    ///
+    /// 返回：当无法打开或读取文件时返回 `SqllogError::Io`。
     fn read_file_lines<P, C>(path: P, mut cb: C) -> Result<(), SqllogError>
     where
         P: AsRef<std::path::Path>,
-        C: FnMut(&[u8], usize),
+        C: FnMut(&[u8]),
     {
-        let file =
-            std::fs::File::open(path.as_ref()).map_err(SqllogError::Io)?;
+        let file = File::open(path.as_ref()).map_err(SqllogError::Io)?;
         let mut reader = BufReader::new(file);
         let mut buf = Vec::new();
-        while {
+        loop {
             buf.clear();
             match reader.read_until(b'\n', &mut buf) {
-                Ok(0) | Err(_) => false,
-                Ok(n) => {
-                    // 获取原始行（不去除尾部 CR/LF，也不去除前导空白）
-                    cb(&buf, n);
-                    true
-                }
+                Ok(0) => break,
+                Err(e) => return Err(SqllogError::Io(e)),
+                Ok(_) => cb(&buf),
             }
-        } {}
+        }
 
         Ok(())
     }
 
-    // 已删除 get_raw_line：直接在 read_file_lines 中使用缓冲切片。
-
-    // 注意：流式解析使用 BufReader::read_until，因此旧的 next_raw_line_impl 已移除。
+    /// 处理原始行字节并将其转换为字符串后交给 `process_line` 解析。
+    ///
+    /// 该函数负责将可能包含无效 UTF-8 的字节安全地转换为 String，
+    /// 并在转换过程中将 UTF-8 错误记录到 `errors` 中，但不会中断解析流程。
+    ///
+    /// 参数说明：
+    /// - `line_bytes`: 当前读取到的行字节（包含换行符）。
+    /// - `line_num`: 当前行号引用（会在必要时更新）。
+    /// - `has_first_row`: 指示是否已遇到首行（用于跳过文件头或无效内容）。
+    /// - `content`: 解析时用于拼接多行记录的临时字符串缓冲。
+    /// - `sqllogs`: 当前块的解析结果向量，会把解析出的记录 push 到该向量中。
+    /// - `errors`: 解析过程中收集的错误列表，包含行号、原始文本片段和错误类型。
     fn handle_raw_line_impl(
         line_bytes: &[u8],
         line_num: &mut usize,
@@ -194,9 +183,8 @@ impl Sqllog {
     ) {
         // 始终获取一个 String（在无效 UTF-8 情况下可能丢失信息）。UTF-8 错误会在
         // utils::line_bytes_to_str_impl 中被记录，但不会致命；解析会继续处理后续行。
-        let line_str = crate::sqllog::utils::line_bytes_to_str_impl(
-            line_bytes, *line_num, errors,
-        );
+        let line_str =
+            utils::line_bytes_to_str_impl(line_bytes, *line_num, errors);
 
         Self::process_line(
             line_str.as_ref(),
@@ -208,30 +196,11 @@ impl Sqllog {
         );
     }
 
-    pub fn print_progress(
-        current: usize,
-        total: usize,
-        last_percent: &mut u8,
-        file_name: &str,
-    ) {
-        // 使用整数运算以避免浮点转换导致的精度损失并触发 clippy 的严格警告。
-        // 先以基点（basis points）计算百分比，然后除以得到整型百分比值。
-        if total == 0 {
-            return;
-        }
-        let current_u128 = current as u128;
-        let total_u128 = total as u128;
-        let percent_u128 = (current_u128.saturating_mul(100u128)) / total_u128;
-        // 安全地转换为 u8；若值超出范围，则钳制为 100%。
-        let percent = u8::try_from(percent_u128).unwrap_or(100u8);
-        if percent >= last_percent.saturating_add(5) {
-            print!("\r文件 {file_name} 处理进度: {percent}% ");
-            io::Write::flush(&mut io::stdout()).ok();
-            *last_percent = percent;
-        }
-    }
-
-    // 初始化流解析所需的状态（文件名和总字节数）
+    /// 初始化流解析所需的状态：返回文件名和文件总字节数。
+    ///
+    /// 说明：打开文件并读取 metadata 以判断文件是否存在或为空。
+    ///
+    /// 返回：`Ok((file_name, total_bytes))`，在无法打开文件时返回 `SqllogError::Io`。
     fn init_stream_state<P: AsRef<std::path::Path>>(
         path: &P,
     ) -> Result<(String, usize), SqllogError> {
@@ -243,8 +212,7 @@ impl Sqllog {
             .to_string();
 
         // 尝试打开文件以区分“文件不存在”与“空文件”。
-        let file =
-            std::fs::File::open(path.as_ref()).map_err(SqllogError::Io)?;
+        let file = File::open(path.as_ref()).map_err(SqllogError::Io)?;
         let total = file
             .metadata()
             .map(|m| usize::try_from(m.len()).unwrap_or(0usize))
@@ -252,105 +220,84 @@ impl Sqllog {
 
         Ok((file_name, total))
     }
+}
 
-    // 每行的处理逻辑（封装为函数以便 stream_parse 更简洁）
-    #[allow(clippy::too_many_arguments)]
+/// `ParseState`: 聚合解析过程的可变状态，避免函数参数过多。
+///
+/// 该结构保存了流式解析过程中需要的可变信息：当前行号、是否已遇到首条有效日志、
+/// 当前拼接内容缓冲、当前块的解析结果与错误集合以及可选的块大小设置。
+struct ParseState {
+    line_num: usize,
+    has_first_row: bool,
+    content: String,
+    chunk: Vec<Sqllog>,
+    chunk_errors: Vec<(usize, String, SqllogError)>,
+    chunk_size: Option<usize>,
+}
+
+impl ParseState {
+    fn new(chunk_size: Option<usize>) -> Self {
+        Self {
+            line_num: 1usize,
+            has_first_row: false,
+            content: String::new(),
+            chunk: Vec::with_capacity(chunk_size.unwrap_or(1).max(1)),
+            chunk_errors: Vec::new(),
+            chunk_size,
+        }
+    }
+
+    /// 处理读取到的一行字节，将其解析并可能触发 `hook` 或 `err_hook`。
+    ///
+    /// 参数说明：
+    /// - `line`: 当前读取到的行字节切片。
+    /// - `hook`: 成功解析记录时的回调，会在满足块大小或 EOF 时被调用。
+    /// - `err_hook`: 解析发生错误时的回调，会在发生错误时被调用。
     fn process_line_callback<F, EF>(
+        &mut self,
         line: &[u8],
-        line_num: &mut usize,
-        has_first_row: &mut bool,
-        content: &mut String,
-        chunk: &mut Vec<Self>,
-        chunk_errors: &mut Vec<(usize, String, SqllogError)>,
-        chunk_size: Option<usize>,
         hook: &mut F,
         err_hook: &mut EF,
-        parsed_count: &mut usize,
-        errors_total: &mut usize,
     ) where
-        F: FnMut(&[Self]),
+        F: FnMut(&[Sqllog]),
         EF: FnMut(&[(usize, String, SqllogError)]),
     {
-        Self::handle_raw_line_impl(
+        Sqllog::handle_raw_line_impl(
             line,
-            line_num,
-            has_first_row,
-            content,
-            chunk,
-            chunk_errors,
+            &mut self.line_num,
+            &mut self.has_first_row,
+            &mut self.content,
+            &mut self.chunk,
+            &mut self.chunk_errors,
         );
 
-        // update counters based on what was pushed to sqllogs/errors in process_line_impl
-        // parsed_count 增长为 chunk 的当前长度之和（这是近似统计，精确计数需要在 process_line_impl 内返回信息）
-        *parsed_count = parsed_count.saturating_add(chunk.len());
-        *errors_total = errors_total.saturating_add(chunk_errors.len());
-
-        if let Some(n) = chunk_size {
-            if chunk.len() >= n {
-                if !chunk_errors.is_empty() {
-                    (err_hook)(&*chunk_errors);
-                }
-
-                if !chunk.is_empty() {
-                    hook(&*chunk);
-                }
-
-                Self::flush_chunk(chunk, chunk_errors);
+        // 若配置了 chunk_size 且达到阈值，则触发一次块终结与回调
+        if let Some(n) = self.chunk_size {
+            if self.chunk.len() >= n {
+                self.finalize_at_eof(hook, err_hook);
             }
         }
     }
 
-    // EOF 时的最终化逻辑（flush content, report errors, call hook，然后清理）
-    #[allow(clippy::too_many_arguments)]
-    fn finalize_at_eof<F, EF>(
-        content: &str,
-        line_num: usize,
-        chunk: &mut Vec<Self>,
-        chunk_errors: &mut Vec<(usize, String, SqllogError)>,
-        hook: &mut F,
-        err_hook: &mut EF,
-        has_first_row: bool,
-    ) where
-        F: FnMut(&[Self]),
+    /// 在 EOF 或块边界处进行终结处理：上报错误并将当前块发送给 `hook`，然后清理状态。
+    ///
+    /// 参数说明：
+    /// - `hook`: 当存在解析出的记录块时被调用以传递这些记录。
+    /// - `err_hook`: 当存在收集到的解析错误时被调用以传递这些错误。
+    fn finalize_at_eof<F, EF>(&mut self, hook: &mut F, err_hook: &mut EF)
+    where
+        F: FnMut(&[Sqllog]),
         EF: FnMut(&[(usize, String, SqllogError)]),
     {
-        if !content.is_empty() {
-            Self::flush_content(content, line_num, chunk, chunk_errors);
+        if !self.chunk_errors.is_empty() {
+            err_hook(&self.chunk_errors);
         }
 
-        // 如果从未遇到过首行，视为 "无有效日志行" 错误（与旧逻辑兼容）
-        // 无论是否产生过具体的解析错误，都返回一个统一的错误，便于上层处理。
-        if !has_first_row {
-            // 如果存在关键错误类型（例如 UTF8/IO/Regex/ParseInt），优先返回这些错误以保留原始问题信息；
-            // 否则将其归一化为 "无有效日志行"，与历史行为一致。
-            let has_critical = chunk_errors.iter().any(|(_, _, e)| {
-                matches!(
-                    e,
-                    SqllogError::Utf8(_)
-                        | SqllogError::Io(_)
-                        | SqllogError::Regex(_)
-                        | SqllogError::ParseInt(_)
-                )
-            });
-
-            if has_critical {
-                (err_hook)(&*chunk_errors);
-                return;
-            }
-
-            let err = SqllogError::Other("无有效日志行".to_string());
-            (err_hook)(&[(0usize, "无有效日志行".to_string(), err)]);
-            return;
+        if !self.chunk.is_empty() {
+            hook(&self.chunk);
         }
 
-        if !chunk_errors.is_empty() {
-            (err_hook)(&*chunk_errors);
-        }
-
-        if !chunk.is_empty() {
-            hook(&*chunk);
-        }
-
-        Self::flush_chunk(chunk, chunk_errors);
+        self.chunk.clear();
+        self.chunk_errors.clear();
     }
 }

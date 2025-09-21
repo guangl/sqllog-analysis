@@ -1,3 +1,11 @@
+// 分析日志模块 - 负责配置和初始化应用程序的日志记录功能
+//
+// 该模块提供了灵活的日志配置，支持：
+// - 文件日志记录（自动按日期命名）
+// - 控制台输出（可选）
+// - 可配置的日志等级
+// - 异步非阻塞写入（提高性能）
+
 use chrono::Local;
 use lazy_static::lazy_static;
 use log::LevelFilter;
@@ -8,19 +16,32 @@ use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 lazy_static! {
-    // 保持 guard 在程序生命周期内，退出时可以 take() 来触发 flush/drop
+    /// 全局日志守护者，用于确保日志工作线程在程序退出时正确清理
+    /// 保持 guard 在程序生命周期内，退出时可以 take() 来触发 flush/drop
     static ref LOG_GUARD: Mutex<Option<WorkerGuard>> = Mutex::new(None);
 }
 
-/// 日志配置参数
+/// 日志配置参数结构体
+///
+/// 控制应用程序的日志行为，包括输出目标、日志等级等设置。
 pub struct LogConfig {
+    /// 是否启用日志功能
     pub enabled: bool,
+    /// 日志等级过滤器（Error/Warn/Info/Debug/Trace）
     pub level: LevelFilter,
+    /// 日志文件路径配置（可以是文件路径或目录名）
     pub log_file: Option<PathBuf>,
+    /// 是否同时在控制台输出日志
     pub enable_stdout: bool,
 }
 
 impl Default for LogConfig {
+    /// 提供默认的日志配置
+    ///
+    /// - 启用日志记录
+    /// - 日志等级为 Info
+    /// - 默认日志目录为 "sqllog"
+    /// - 关闭控制台输出（仅文件记录）
     fn default() -> Self {
         Self {
             enabled: true,
@@ -32,22 +53,48 @@ impl Default for LogConfig {
 }
 
 impl LogConfig {
-    // 日志配置逻辑：当前通过 `Default` 提供默认配置
-
-    /// 初始化日志（使用 `env_logger`）
+    /// 初始化日志系统（使用 `tracing_subscriber`）
     ///
-    /// 说明：`env_logger` 不提供内置的文件轮换；如果需要轮换日志文件，建议使用 `flexi_logger` 或其他库。
-    pub fn init(&self) {
+    /// 该方法配置并初始化异步日志系统，支持同时写入文件和控制台。
+    /// 日志文件按日期自动命名（格式：sqllog-analysis-YYYY-MM-DD.log）。
+    ///
+    /// 日志目录/文件路径解析规则：
+    /// - 如果 `log_file` 为 None，使用当前目录下的 `logs` 文件夹
+    /// - 如果 `log_file` 包含文件扩展名，视为完整文件路径
+    /// - 如果 `log_file` 不含扩展名，视为目录名，在其下创建按日期命名的文件
+    ///
+    /// # Errors
+    ///
+    /// 当无法创建日志目录或打开日志文件时，会返回 `io::Error`。
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let config = LogConfig {
+    ///     enabled: true,
+    ///     level: LevelFilter::Info,
+    ///     log_file: Some(PathBuf::from("logs")),
+    ///     enable_stdout: true,
+    /// };
+    /// config.init()?;
+    /// ```
+    pub fn init(&self) -> io::Result<()> {
         if !self.enabled {
-            return;
+            return Ok(());
         }
 
-        // 使用 tracing_subscriber 初始化格式化与过滤
+        // 创建环境变量过滤器，如果环境变量未设置则使用配置中的日志等级
         let filter = EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| EnvFilter::new(format!("{}", self.level)));
 
-        let dir = self.log_file.as_ref().map_or_else(
+        // 根据配置确定最终的日志文件路径
+        // 支持三种配置方式：
+        // 1. None - 使用默认的 cwd/logs 目录
+        // 2. 带扩展名的路径 - 直接作为文件路径
+        // 3. 不带扩展名的路径 - 作为目录，在其下创建按日期命名的文件
+        let file_path = self.log_file.as_ref().map_or_else(
             || {
+                // 情况 1：使用默认路径 (cwd/logs/sqllog-analysis-YYYY-MM-DD.log)
                 let mut p = match env::current_dir() {
                     Ok(p) => p,
                     Err(e) => {
@@ -58,59 +105,69 @@ impl LogConfig {
                     }
                 };
                 p.push("logs");
-                // 如果目录不存在，尝试创建
-                if let Err(e) = fs::create_dir_all(&p) {
-                    let p_display = p.display();
-                    eprintln!("无法创建日志目录 {p_display}: {e}");
-                }
-                p
+                let date = Local::now().format("%Y-%m-%d").to_string();
+                let filename = format!("sqllog-analysis-{date}.log");
+                p.join(filename)
             },
-            Clone::clone,
+            |p| {
+                if p.extension().is_some() {
+                    // 情况 2：直接作为完整文件路径使用
+                    p.clone()
+                } else {
+                    // 情况 3：作为目录名，在其下创建按日期命名的文件
+                    let dir = p.clone();
+                    let date = Local::now().format("%Y-%m-%d").to_string();
+                    let filename = format!("sqllog-analysis-{date}.log");
+                    dir.join(filename)
+                }
+            },
         );
 
-        // 构建精确文件名 sqllog-analysis-YYYY-MM-DD.log
-        let date = Local::now().format("%Y-%m-%d").to_string();
-        let filename = format!("sqllog-analysis-{date}.log");
-        let file_path = dir.join(filename);
+        // 确保日志文件的父目录存在，失败则早期返回错误
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
 
-        // 打开（创建并追加）文件
+        // 以追加模式打开日志文件（如果不存在则创建）
         let file =
-            match OpenOptions::new().create(true).append(true).open(&file_path)
-            {
-                Ok(f) => f,
-                Err(e) => {
-                    eprintln!("无法创建日志文件 {}: {e}", file_path.display());
-                    return;
-                }
-            };
+            OpenOptions::new().create(true).append(true).open(&file_path)?;
 
+        // 创建非阻塞写入器，提高日志性能
         let (non_blocking, guard) = NonBlocking::new(file);
-        // 将 guard 存入全局可控位置，以便在退出时可显式 drop（触发 flush）
+
+        // 将守护者存储到全局变量，确保程序退出时正确清理
         if let Ok(mut g) = LOG_GUARD.lock() {
             *g = Some(guard);
         }
 
-        // 创建输出层：文件层始终启用；stdout 层使用配置中的值（若指定），否则在 debug 构建启用，在 release 构建关闭。
+        // 配置控制台输出层的过滤器
         let stdout_filter = if self.enable_stdout {
             filter.clone()
         } else {
-            EnvFilter::new("off")
+            EnvFilter::new("off") // 关闭控制台输出
         };
 
+        // 创建输出层：
+        // - stdout_layer: 控制台输出层（根据配置启用/禁用）
+        // - file_layer: 文件输出层（始终启用）
         let stdout_layer =
             fmt::layer().with_writer(io::stdout).with_filter(stdout_filter);
         let file_layer =
             fmt::layer().with_writer(non_blocking).with_filter(filter);
 
+        // 注册并初始化 tracing 订阅器
         tracing_subscriber::registry()
             .with(stdout_layer)
             .with(file_layer)
             .init();
 
+        // 记录初始化成功信息
         if self.enable_stdout {
             info!("日志功能已启用（stdout + file），等级: {:?}", self.level);
         } else {
             info!("日志功能已启用（仅文件），等级: {:?}", self.level);
         }
+
+        Ok(())
     }
 }

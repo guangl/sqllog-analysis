@@ -11,7 +11,7 @@ fn test_logconfig_init_disabled_no_panic() {
         log_file: None,
         enable_stdout: false,
     };
-    cfg.init();
+    cfg.init().unwrap();
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn test_logconfig_init_with_dir_creates_logs_dir() {
         log_file: Some(p.clone()),
         enable_stdout: false,
     };
-    cfg.init();
+    cfg.init().unwrap();
     // directory should exist (logs file inside)
     assert!(p.exists());
 }
