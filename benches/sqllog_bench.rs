@@ -65,9 +65,27 @@ fn bench_sqllog_varied(c: &mut Criterion) {
                         (dir, p)
                     },
                     |(dir, path)| {
-                        let (logs, errors) =
-                            Sqllog::from_file_with_errors(&path);
-                        assert_eq!(logs.len(), size);
+                        let mut parsed = 0usize;
+                        let mut errors: Vec<(usize, String, String)> =
+                            Vec::new();
+                        let res = Sqllog::parse_all(
+                            &path,
+                            |chunk| {
+                                parsed = parsed.saturating_add(chunk.len());
+                            },
+                            |err_chunk| {
+                                for e in err_chunk.iter() {
+                                    errors.push((
+                                        e.0,
+                                        e.1.clone(),
+                                        format!("{}", e.2),
+                                    ));
+                                }
+                            },
+                        );
+                        // ensure parse_all didn't return fatal IO error
+                        assert!(res.is_ok());
+                        assert_eq!(parsed, size);
                         assert!(errors.is_empty());
                         drop(path);
                         drop(dir);

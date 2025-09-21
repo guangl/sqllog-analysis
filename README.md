@@ -4,6 +4,14 @@
 
 本工具用于分析达梦数据库产生的 sqllog 文件。它可读取日志文件、将解析结果导入 DuckDB 以便后续分析（例如导出事务相关信息）。
 
+## TODO
+
+目前需要的功能有
+- [ ] 多线程并发分析 sqllog，每个文件都有一个线程用来分析（线程数量可以配置）；
+- [ ] 多线程并发插入到 duckdb 中的 sqllogs 表里面；
+- [ ] duckdb 可以导出成 excel/csv/json（导出类型可以配置）；
+- [ ] duckdb 可以使用内存数据库或者磁盘数据库；
+
 ## 日志（Logging）
 
 本项目使用 `tracing` / `tracing-subscriber` 进行日志记录。

@@ -5,6 +5,8 @@
 enable_stdout = true
 # 日志目录
 log_dir = "logs"
+ # 日志等级：error/warn/info/debug/trace/off
+ level = "info"
 
 [database]
 # DuckDB 数据库文件路径
@@ -43,3 +45,6 @@ file_size_bytes = 104857600
 # 当未提供时，程序默认使用相对目录 "sqllog"（即运行目录下的 sqllog/）。
 [sqllog]
 sqllog_dir = "sqllog"
+# 可选：按解析出的记录数分块处理日志文件，每当解析出指定数量的条目时会触发一次处理回调。
+# 如果设置为 0 或者省略，则表示禁用分块（一次性解析完整文件）。
+# chunk_size = 1000

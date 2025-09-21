@@ -45,7 +45,3 @@ harness = false
 [[bench]]
 name = "sqllog_bench"
 harness = false
-
-[[bench]]
-name = "duckdb_write_bench"
-harness = false

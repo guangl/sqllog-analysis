@@ -39,8 +39,14 @@ fn init_logging(runtime: &RuntimeConfig) {
     let log_config = LogConfig {
         enable_stdout: runtime.enable_stdout,
         log_file: runtime.log_dir.clone(),
+        level: runtime.log_level,
         ..Default::default()
     };
+    // 在初始化日志之前先打印当前日志相关配置（便于在 enable_stdout=false 时也能看到等级）
+    println!(
+        "日志等级配置: {:?}, stdout: {}",
+        log_config.level, log_config.enable_stdout
+    );
     log_config.init();
 }
 
