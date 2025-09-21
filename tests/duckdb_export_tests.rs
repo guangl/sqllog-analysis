@@ -26,7 +26,8 @@ fn test_export_csv_json_xlsx() {
     }];
 
     // write to DB
-    duckdb_writer::write_sqllogs_to_duckdb(&db_path, &records).expect("write");
+    duckdb_writer::write_sqllogs_to_duckdb(&db_path, &records, false)
+        .expect("write");
 
     // export csv
     let csv_path = dir.path().join("out.csv");

@@ -9,6 +9,8 @@ log_dir = "logs"
 [database]
 # DuckDB 文件路径（默认：sqllogs.duckdb）
 db_path = "sqllogs.duckdb"
+# 使用内存数据库，默认为 false
+use_in_memory = true
 
 # 导出相关配置
 [export]
@@ -17,7 +19,7 @@ enabled = true
 # 导出格式：csv, json, excel (或 xlsx)
 format = "csv"
 # 导出到的目标文件路径（文件名/目录）
-out_path = "exports/out.csv"
+out_path = "sqllog.csv"
 # 是否按线程分别输出（与 DuckDB COPY 的 PER_THREAD_OUTPUT 对应）
 per_thread_out = false
 # 导出写入模式的 flags（见下方说明）
@@ -26,6 +28,11 @@ overwrite = false
 append = false
 # 可选：单个导出文件的最大字节数（例如 100 MiB）
 file_size_bytes = 104857600
+
+# 注意：当 [database].use_in_memory = true 时，程序在内存中使用 DuckDB，
+# 因为内存数据库是临时和匿名的，程序无法直接从该内存实例执行导出（COPY）到磁盘路径。
+# 如果启用了内存数据库且仍需要导出，请把数据写到持久的 DuckDB 文件（把 use_in_memory 设为 false 并设置 db_path），
+# 或者在应用层手动把内存数据库 ATTACH 到磁盘并执行导出操作。
 
 # sqllog 相关配置
 [sqllog]

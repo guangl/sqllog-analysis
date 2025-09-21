@@ -72,3 +72,44 @@ sqllog_dir = "sqllog"
 ```
 
 说明：将 `sqllog_dir` 设置为 `"sqllog"` 是默认且推荐的简单用法，适合在同一目录下管理日志与解析数据的场景。若需要把 sqllog 存放在集中日志服务器或不同分区，请使用绝对路径。
+
+## 导出配置说明（重要）
+
+在 `[export]` 节中可以设置 `file_size_bytes` 来指定单个导出文件的大小上限（以字节为单位）。注意：
+
+- `export.file_size_bytes` 不能设置为 0。配置为 `0` 会被视为配置错误，程序在启动时解析配置时会打印错误并以非零退出码退出。要表示“无上限”，请删除该项或不在配置中设置它；要限制大小，请设置为大于 0 的正整数。
+
+示例：
+
+```toml
+[export]
+# 导出开关
+enabled = true
+# 导出目标格式：csv/json/excel
+format = "csv"
+# 导出目标路径
+out_path = "exports/out.csv"
+# 单个导出文件大小上限（字节），注意：不能为 0；删除此行以表示无上限
+file_size_bytes = 104857600
+```
+
+注意和变更说明：
+
+- `export.file_size_bytes` 不能设置为 `0`。如果在配置文件中设置为 `0`，程序在启动时会视为配置错误并以非零退出码终止。要表示“无上限”，请删除该项或注释掉它。
+- 内存导出（in-memory export）行为变更：当配置或运行时选择使用内存导出路径（`use_in_memory`），程序会先在内存中的 DuckDB 写入数据，然后——默认情况下——不会把内存数据库自动 ATTACH 到磁盘并 CTAS 导出回磁盘文件。换言之，内存路径现在是“内存写入仅保留在内存”。如果你需要旧的将内存数据写回磁盘的行为，请使用相应的配置开关（见 `config.toml.example` 中的说明）。
+
+基准（Benchmark）说明：
+
+本仓库包含一个 Criterion 基准（`benches/duckdb_write_bench.rs`），测试三种写入路径的性能：
+
+- `appender_direct`：直接通过写入 API 将记录插入磁盘上的 DuckDB。
+- `in_memory_ctas`：在内存中写入，然后（旧行为）CTAS 导出到磁盘；在当前默认实现下内存写入不会导出到磁盘，基准仍衡量内存写入成本。
+- `csv_copy`：先写入临时 CSV，然后用 DuckDB 的 COPY FROM 导入。
+
+运行基准：
+
+```powershell
+cargo bench --bench duckdb_write_bench
+```
+
+基准会在多个规模下测量（例如 10k, 50k, 200k 条记录），并输出 Criterion 的报告。下面我会运行基准并把结果绘制为 PNG 图表以便直观比较。

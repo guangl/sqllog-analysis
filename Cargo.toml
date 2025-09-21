@@ -39,9 +39,13 @@ lazy_static = "1.5"
 chrono = "0.4"
 
 [[bench]]
-name = "datetime_benchmark"
+name = "datetime_bench"
 harness = false
 
 [[bench]]
-name = "sqllog_benchmark"
+name = "sqllog_bench"
+harness = false
+
+[[bench]]
+name = "duckdb_write_bench"
 harness = false
