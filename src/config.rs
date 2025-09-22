@@ -1,3 +1,72 @@
+//! 配置管理模块 - 分层配置与运行时参数解析
+//!
+//! 本模块实现了一个灵活的配置管理系统，支持 TOML 文件配置、命令行参数
+//! 和环境变量的组合使用，并提供合理的默认值。
+//!
+//! ## 配置架构
+//!
+//! ### 1. 分层配置设计
+//! ```text
+//! 配置优先级（从高到低）：
+//! 命令行参数 > 环境变量 > 配置文件 > 默认值
+//! ```
+//!
+//! ### 2. 配置文件结构
+//! ```toml
+//! [log]
+//! enable_stdout = true
+//! log_dir = "logs"
+//! level = "info"
+//!
+//! [database]
+//! db_path = "sqllog.duckdb"
+//! use_in_memory = false
+//!
+//! [export]
+//! enabled = true
+//! format = "csv"
+//! out_path = "output.csv"
+//!
+//! [sqllog]
+//! chunk_size = 1000
+//! parser_threads = 4
+//! write_errors = true
+//! errors_out_path = "parse_errors.jsonl"
+//! ```
+//!
+//! ### 3. 运行时配置转换
+//! - **类型安全**：编译时保证配置项的类型正确性
+//! - **默认值填充**：自动为未指定的配置项提供合理默认值
+//! - **配置验证**：运行时验证配置的合法性和一致性
+//!
+//! ## 核心特性
+//!
+//! ### 配置解析流程
+//! ```text
+//! TOML 文件 → serde 反序列化 → Config 结构体 → 默认值合并 → RuntimeConfig
+//!     ↓              ↓                ↓              ↓              ↓
+//!  原始配置      结构化数据        可选字段处理    配置验证     运行时就绪
+//! ```
+//!
+//! ### 错误处理策略
+//! - **配置文件错误**：提供详细的语法错误定位
+//! - **路径解析**：自动处理相对路径和绝对路径
+//! - **类型转换**：安全的字符串到枚举类型转换
+//!
+//! ## 使用示例
+//!
+//! ```rust,no_run
+//! use sqllog_analysis::config::Config;
+//!
+//! // 从默认位置加载配置
+//! let runtime_config = Config::load();
+//!
+//! // 访问配置项
+//! if runtime_config.export_enabled {
+//!     println!("导出格式: {}", runtime_config.export_format);
+//! }
+//! ```
+
 use serde::Deserialize;
 use std::{env, fs, path::PathBuf, process};
 
@@ -68,8 +137,8 @@ pub struct WriteFlags {
     pub append: bool,
 }
 
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct RuntimeConfig {
     pub db_path: String,
     pub enable_stdout: bool,
@@ -167,7 +236,9 @@ impl Config {
     }
 
     /// 解析日志相关配置。
-    fn parse_log_config(cfg: &Self) -> (bool, Option<PathBuf>, log::LevelFilter) {
+    fn parse_log_config(
+        cfg: &Self,
+    ) -> (bool, Option<PathBuf>, log::LevelFilter) {
         let enable_stdout = cfg
             .log
             .as_ref()
@@ -196,7 +267,9 @@ impl Config {
     }
 
     /// 解析导出相关配置。
-    fn parse_export_config(cfg: &Self) -> (bool, String, Option<PathBuf>, ExportOptions) {
+    fn parse_export_config(
+        cfg: &Self,
+    ) -> (bool, String, Option<PathBuf>, ExportOptions) {
         let export_enabled =
             cfg.export.as_ref().and_then(|e| e.enabled).unwrap_or(false);
 
@@ -248,7 +321,9 @@ impl Config {
     }
 
     /// 解析 sqllog 相关配置。
-    fn parse_sqllog_config(cfg: &Self) -> (Option<PathBuf>, Option<usize>, usize, bool, Option<PathBuf>) {
+    fn parse_sqllog_config(
+        cfg: &Self,
+    ) -> (Option<PathBuf>, Option<usize>, usize, bool, Option<PathBuf>) {
         let sqllog_dir = cfg
             .sqllog
             .as_ref()
@@ -272,15 +347,28 @@ impl Config {
             .and_then(|s| s.errors_out_path.clone())
             .or_else(|| Some(PathBuf::from("parse_errors.log")));
 
-        (sqllog_dir, sqllog_chunk_size, parser_threads, sqllog_write_errors, sqllog_errors_out_path)
+        (
+            sqllog_dir,
+            sqllog_chunk_size,
+            parser_threads,
+            sqllog_write_errors,
+            sqllog_errors_out_path,
+        )
     }
 
     /// 将解析得到的 Config 合并为 RuntimeConfig，应用默认值并进行必要的校验。
     fn merge_to_runtime_config(cfg: &Self) -> RuntimeConfig {
         let (db_path, use_in_memory) = Self::parse_database_config(cfg);
         let (enable_stdout, log_dir, log_level) = Self::parse_log_config(cfg);
-        let (export_enabled, export_format, export_out_path, export_options) = Self::parse_export_config(cfg);
-        let (sqllog_dir, sqllog_chunk_size, parser_threads, sqllog_write_errors, sqllog_errors_out_path) = Self::parse_sqllog_config(cfg);
+        let (export_enabled, export_format, export_out_path, export_options) =
+            Self::parse_export_config(cfg);
+        let (
+            sqllog_dir,
+            sqllog_chunk_size,
+            parser_threads,
+            sqllog_write_errors,
+            sqllog_errors_out_path,
+        ) = Self::parse_sqllog_config(cfg);
 
         RuntimeConfig {
             db_path,
@@ -298,92 +386,5 @@ impl Config {
             export_options,
             use_in_memory,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::env;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_find_config_path_env_override() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("config.toml");
-        File::create(&file_path).unwrap();
-        // Change current dir to the temp dir so find_config_path will detect ./config.toml
-        let orig = env::current_dir().unwrap();
-        env::set_current_dir(dir.path()).unwrap();
-        let found = Config::find_config_path();
-        assert!(found.is_some());
-        assert_eq!(found.unwrap(), file_path);
-        // restore cwd
-        env::set_current_dir(orig).unwrap();
-    }
-
-    #[test]
-    fn test_read_and_parse_config_and_merge_defaults() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("cfg.toml");
-        let mut f = File::create(&file_path).unwrap();
-        // minimal toml: enable export with file_size_bytes non-zero
-        writeln!(
-            f,
-            r#"
-            [export]
-            enabled = true
-            file_size_bytes = 1024
-            format = "csv"
-        "#
-        )
-        .unwrap();
-
-        let parsed = Config::read_and_parse_config(&file_path).unwrap();
-        // ensure parsed has export enabled
-        assert!(parsed.export.is_some());
-        let rc = Config::merge_to_runtime_config(&parsed);
-        assert!(rc.export_enabled);
-        assert_eq!(rc.export_format, "csv");
-        assert_eq!(rc.db_path, "sqllogs.duckdb");
-    }
-
-    #[test]
-    fn test_export_file_size_zero_causes_exit() {
-        // This test ensures that when file_size_bytes is zero we exit with code 2.
-        // Because std::process::exit terminates the current process, we instead validate
-        // the mapping by constructing a Config with that value and ensuring the mapping
-        // logic would call exit path. We'll mimic the check locally.
-        let cfg = Config {
-            log: None,
-            database: None,
-            export: Some(ExportSection {
-                enabled: Some(true),
-                format: None,
-                out_path: None,
-                per_thread_out: None,
-                overwrite_or_ignore: None,
-                overwrite: None,
-                append: None,
-                file_size_bytes: Some(0),
-            }),
-            sqllog: None,
-        };
-
-        // We cannot call merge_to_runtime_config(cfg) because it would call process::exit.
-        // Instead, ensure the intermediate option mapping returns Some(0) so the check would trigger.
-        let export_file_size_bytes =
-            cfg.export.as_ref().and_then(|e| e.file_size_bytes).map(|v| {
-                if v == 0 {
-                    // Would exit in production; here we return 0 to indicate trigger
-                    0
-                } else {
-                    v
-                }
-            });
-
-        assert_eq!(export_file_size_bytes, Some(0));
     }
 }

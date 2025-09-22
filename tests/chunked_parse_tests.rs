@@ -101,6 +101,7 @@ fn chunk_size_zero_no_chunking() {
     let mut calls = 0usize;
     let res = Sqllog::parse_all(
         path.clone(),
+        0, // chunk_size 为 0 表示不分块
         |_all: &[sqllog_analysis::sqllog::Sqllog]| {
             calls += 1;
         },

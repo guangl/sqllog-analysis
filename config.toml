@@ -1,7 +1,7 @@
 [log]
 enable_stdout = true
 log_dir = "logs"
-level = "info"
+level = "debug"
 
 [database]
 db_path = "sqllogs.duckdb"
@@ -20,4 +20,6 @@ append = false
 
 [sqllog]
 sqllog_dir = "sqllog"
-chunk_size = 1000
+chunk_size = 0
+write_errors = true
+errors_out_path = "parse_errors.jsonl"

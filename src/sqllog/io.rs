@@ -1,6 +1,3 @@
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::doc_markdown)]
-
 use crate::sqllog::{
     types::{Sqllog, SqllogError},
     utils,
@@ -13,16 +10,23 @@ use std::{
 impl Sqllog {
     /// 解析整个文件，并在解析出记录时通过 `hook` 回调发送记录片段。
     ///
+    /// 注意：此函数现在与 `parse_in_chunks` 统一签名，当 `chunk_size` 为 0 时表示不分块解析。
+    ///
     /// 参数说明：
     /// - `path`: 要解析的文件路径。
+    /// - `chunk_size`: 每次回调时包含的最大记录数，0 表示不分块（一次性处理所有记录）。
     /// - `hook`: 当解析出一组记录时被调用，接收记录切片 `&[Sqllog]`。
     /// - `err_hook`: 当解析过程中遇到错误时被调用，接收错误列表 `&[(usize, String, SqllogError)]`。
+    ///
+    /// # Errors
+    /// - `SqllogError::Io(_)` - 文件打开或读取时发生 I/O 错误
     ///
     /// 返回值：
     /// - `Ok(())` 表示成功完成文件解析（解析错误通过 `err_hook` 上报，不会作为返回错误）。
     /// - `Err(SqllogError::Io(_))` 表示在打开或读取文件时发生 I/O 错误。
     pub fn parse_all<P, F, EF>(
         path: P,
+        chunk_size: usize,
         hook: F,
         err_hook: EF,
     ) -> Result<(), SqllogError>
@@ -31,7 +35,9 @@ impl Sqllog {
         F: FnMut(&[Self]),
         EF: FnMut(&[(usize, String, SqllogError)]),
     {
-        Self::stream_parse(path, None, hook, err_hook)
+        // chunk_size 为 0 时表示不分块，传递 None 给 stream_parse
+        let chunk_opt = if chunk_size == 0 { None } else { Some(chunk_size) };
+        Self::stream_parse(path, chunk_opt, hook, err_hook)
     }
 
     /// 按块解析文件，每次最多 `chunk_size` 条记录，并在每个块解析完成后调用 `hook`。
@@ -41,6 +47,9 @@ impl Sqllog {
     /// - `chunk_size`: 每次回调时包含的最大记录数。
     /// - `hook`: 当收集到一块记录时被调用，接收记录切片 `&[Sqllog]`。
     /// - `err_hook`: 当解析过程中遇到错误时被调用，接收错误列表 `&[(usize, String, SqllogError)]`。
+    ///
+    /// # Errors
+    /// - `SqllogError::Io(_)` - 文件打开或读取时发生 I/O 错误
     ///
     /// 返回值与 `parse_all` 类似：I/O 错误会以 `Err(SqllogError::Io(_))` 返回，解析错误通过 `err_hook` 上报。
     pub fn parse_in_chunks<P, F, EF>(
@@ -81,9 +90,19 @@ impl Sqllog {
         F: FnMut(&[Self]),
         EF: FnMut(&[(usize, String, SqllogError)]),
     {
+        let path_ref = path.as_ref();
+        log::debug!(
+            "stream_parse: 开始解析文件 {}, chunk_size = {:?}",
+            path_ref.display(),
+            chunk_size
+        );
+
         let (file_name, total) = Self::init_stream_state(&path)?;
+        log::debug!("stream_parse: 文件大小 {total} 字节");
         log::trace!("开始处理文件: {file_name}");
+
         if total == 0 {
+            log::debug!("stream_parse: 文件为空，直接返回");
             return Ok(());
         }
 
@@ -91,11 +110,29 @@ impl Sqllog {
 
         let path_clone = path.as_ref().to_path_buf();
 
+        let mut line_count = 0u64;
+        let mut last_progress_report = std::time::Instant::now();
+
         // 每读取一行字节后调用的闭包，会把字节传给 ParseState 进行处理
         let mut per_line = |line: &[u8]| {
+            line_count += 1;
+
+            // 每处理 100000 行或每 5 秒报告一次进度
+            if line_count % 100_000 == 0
+                || last_progress_report.elapsed().as_secs() >= 5
+            {
+                log::debug!(
+                    "stream_parse: 已处理 {} 行，解析记录数: {}",
+                    line_count,
+                    state.chunk.len()
+                );
+                last_progress_report = std::time::Instant::now();
+            }
+
             state.process_line_callback(line, &mut hook, &mut err_hook);
         };
 
+        log::debug!("stream_parse: 开始逐行读取文件");
         Self::read_file_lines(path_clone, &mut per_line)?;
 
         if !state.content.is_empty() {

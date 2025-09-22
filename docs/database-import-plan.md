@@ -46,27 +46,27 @@ CREATE TABLE IF NOT EXISTS sqllogs (
     -- 基础字段
     id BIGSERIAL PRIMARY KEY,
     timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-    
+
     -- 会话和事务信息
     session_id BIGINT,
     transaction_id BIGINT,
-    
+
     -- SQL 信息
     sql_text TEXT NOT NULL,
     sql_hash VARCHAR(64), -- SQL 文本的哈希值用于去重和分组
-    
+
     -- 客户端信息
     app_name VARCHAR(255),
     client_ip INET,
-    
+
     -- 性能指标
     execution_time_ms BIGINT,
     rows_affected BIGINT,
-    
+
     -- 元数据
     source_file VARCHAR(500),
     source_line_number BIGINT,
-    
+
     -- 索引
     INDEX idx_timestamp (timestamp),
     INDEX idx_session_id (session_id),
@@ -107,7 +107,7 @@ auto_create_indexes = true
 [export]
 # 是否启用导出功能
 enabled = false
-# 导出格式：csv/json/excel
+# 导出格式：csv/json
 format = "csv"
 # 导出文件路径
 out_path = "exports/sqllogs.csv"

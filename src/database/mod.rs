@@ -1,136 +1,153 @@
-// 数据库模块 - 负责 DuckDB 数据库连接、表创建和数据插入功能
+// 数据库模块 - 提供多数据库支持的抽象层
 //
 // 该模块提供：
-// - DuckDB 数据库连接管理
-// - Sqllog 数据表的创建和维护
+// - 可扩展的数据库抽象接口
+// - DuckDB 实现（支持内存和磁盘模式）
 // - 批量数据插入功能
-// - 内存和磁盘数据库支持
-// - 事务管理和错误处理
+// - 多格式数据导出功能
+// - 独立数据库并发处理
 
-use duckdb::{Connection, Result as DuckResult};
-use std::path::Path;
-use crate::sqllog::Sqllog;
-use crate::config::RuntimeConfig;
+mod duckdb_impl;
+mod types;
 
-/// DuckDB 数据库连接管理器
-/// 
-/// 负责管理数据库连接，提供内存和磁盘数据库的统一接口
+use crate::{config, sqllog::Sqllog};
+use anyhow::Result;
+
+pub use duckdb_impl::{
+    DuckDbProvider, IndependentDatabaseStats,
+    process_file_with_independent_database,
+    process_files_with_independent_databases,
+};
+pub use types::*;
+
+/// 数据库提供者抽象接口
+///
+/// 所有数据库实现都必须实现此 trait，提供统一的操作接口
+pub trait DatabaseProvider: Send {
+    /// 初始化数据库连接和表结构
+    /// 初始化数据库
+    ///
+    /// # Errors
+    /// 当数据库初始化失败时返回错误
+    fn initialize(&mut self) -> Result<()>;
+
+    /// 获取记录总数
+    /// 统计记录数
+    ///
+    /// # Errors
+    /// 当数据库查询失败时返回错误
+    fn count_records(&self) -> Result<u64>;
+
+    /// 导出数据到指定格式
+    /// 导出数据到指定格式和路径
+    ///
+    /// # Errors
+    /// 当文件导出失败时返回错误
+    fn export_data(
+        &self,
+        format: ExportFormat,
+        output_path: &str,
+    ) -> Result<()>;
+
+    /// 检查数据库是否已初始化
+    fn is_initialized(&self) -> bool;
+
+    /// 获取数据库类型信息
+    fn database_info(&self) -> DatabaseInfo;
+
+    /// 关闭数据库连接
+    /// 关闭数据库连接
+    ///
+    /// # Errors
+    /// 当数据库关闭失败时返回错误
+    fn close(&mut self) -> Result<()>;
+
+    /// 完成数据插入后创建索引优化查询性能
+    /// 完成数据库架构设置
+    ///
+    /// # Errors
+    /// 当数据库架构完成失败时返回错误
+    fn finalize_schema(&mut self) -> Result<()> {
+        // 默认实现：什么都不做
+        Ok(())
+    }
+}
+
+/// 简化的数据库管理器
+///
+/// 用于独立数据库处理
 pub struct DatabaseManager {
-    /// DuckDB 连接实例
-    connection: Connection,
-    /// 是否使用内存数据库
-    use_in_memory: bool,
-    /// 数据库文件路径（如果是磁盘数据库）
-    db_path: Option<String>,
+    provider: DuckDbProvider,
 }
 
 impl DatabaseManager {
     /// 创建新的数据库管理器
+    /// 创建新的数据库管理器
     ///
-    /// # 参数
-    /// - `config`: 运行时配置，包含数据库路径和内存模式设置
-    ///
-    /// # 返回
-    /// 成功时返回 DatabaseManager 实例，失败时返回 DuckDB 错误
-    pub fn new(config: &RuntimeConfig) -> DuckResult<Self> {
-        let connection = if config.use_in_memory {
-            // 创建内存数据库连接
-            Connection::open_in_memory()?
-        } else {
-            // 创建磁盘数据库连接
-            Connection::open(&config.db_path)?
-        };
+    /// # Errors
+    /// 当数据库提供者创建失败时返回错误
+    pub fn new(config: &config::RuntimeConfig) -> Result<Self> {
+        let provider = DuckDbProvider::new(config)?;
 
-        let db_path = if config.use_in_memory {
-            None
-        } else {
-            Some(config.db_path.clone())
-        };
-
-        Ok(DatabaseManager {
-            connection,
-            use_in_memory: config.use_in_memory,
-            db_path,
-        })
+        Ok(Self { provider })
     }
 
-    /// 初始化数据库表结构
+    /// 初始化数据库
+    /// 初始化数据库
     ///
-    /// 创建 sqllogs 表用于存储解析后的 sqllog 数据
-    ///
-    /// # 返回
-    /// 成功时返回 ()，失败时返回 DuckDB 错误
-    pub fn initialize_schema(&self) -> DuckResult<()> {
-        // TODO: 实现表创建逻辑
-        // CREATE TABLE IF NOT EXISTS sqllogs (
-        //     id BIGINT,
-        //     timestamp TIMESTAMP,
-        //     session_id BIGINT,
-        //     transaction_id BIGINT,
-        //     sql_text TEXT,
-        //     app_name VARCHAR,
-        //     client_ip VARCHAR,
-        //     ...
-        // );
-        
-        todo!("实现 sqllogs 表创建")
+    /// # Errors
+    /// 当数据库初始化失败时返回错误
+    pub fn initialize(&mut self) -> Result<()> {
+        self.provider.initialize()
     }
 
-    /// 批量插入 Sqllog 记录
+    /// 批量插入记录
+    /// 批量插入记录
     ///
-    /// 使用 DuckDB Appender API 进行高性能批量插入
+    /// # Errors
+    /// 当批量插入失败时返回错误
+    pub fn insert_batch(&mut self, records: &[Sqllog]) -> Result<usize> {
+        self.provider.insert_batch(records)
+    }
+
+    /// 批量插入记录 (别名方法)
+    /// 批量插入记录（别名方法）
     ///
-    /// # 参数
-    /// - `records`: 要插入的 Sqllog 记录切片
+    /// # Errors
+    /// 当批量插入失败时返回错误
+    pub fn batch_insert(&mut self, records: &[Sqllog]) -> Result<usize> {
+        self.insert_batch(records)
+    }
+
+    /// 完成数据库架构设置
+    /// 完成数据库架构设置
     ///
-    /// # 返回
-    /// 成功时返回插入的记录数量，失败时返回 DuckDB 错误
-    pub fn insert_batch(&mut self, records: &[Sqllog]) -> DuckResult<usize> {
-        // TODO: 实现批量插入逻辑
-        // 1. 创建 Appender
-        // 2. 逐个添加记录到 Appender
-        // 3. 提交批次
-        
-        todo!("实现批量插入功能")
+    /// # Errors
+    /// 当数据库架构完成失败时返回错误
+    pub fn finalize_schema(&mut self) -> Result<()> {
+        self.provider.finalize_schema()
     }
 
-    /// 获取数据库连接引用
+    /// 获取记录总数
+    /// 统计记录数
     ///
-    /// 用于执行自定义查询或其他数据库操作
-    pub fn connection(&self) -> &Connection {
-        &self.connection
+    /// # Errors
+    /// 当数据库查询失败时返回错误
+    pub fn count_records(&self) -> Result<u64> {
+        self.provider.count_records()
     }
 
-    /// 检查是否使用内存数据库
-    pub fn is_in_memory(&self) -> bool {
-        self.use_in_memory
+    /// 获取数据库信息
+    pub fn database_info(&self) -> DatabaseInfo {
+        self.provider.database_info()
     }
 
-    /// 获取数据库文件路径
+    /// 执行原始 SQL 语句（用于数据库合并等高级操作）
+    /// 执行 SQL 语句
     ///
-    /// 如果使用内存数据库则返回 None
-    pub fn db_path(&self) -> Option<&str> {
-        self.db_path.as_deref()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::RuntimeConfig;
-
-    #[test]
-    fn test_database_manager_memory() {
-        // TODO: 实现内存数据库测试
-    }
-
-    #[test]
-    fn test_database_manager_disk() {
-        // TODO: 实现磁盘数据库测试
-    }
-
-    #[test]
-    fn test_batch_insert() {
-        // TODO: 实现批量插入测试
+    /// # Errors
+    /// 当 SQL 执行失败时返回错误
+    pub fn execute_sql(&mut self, sql: &str) -> Result<()> {
+        self.provider.execute_sql(sql)
     }
 }
