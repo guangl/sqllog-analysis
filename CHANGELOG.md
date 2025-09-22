@@ -36,6 +36,7 @@
 - **错误处理**：完整的错误链传播和用户友好的错误信息
 
 [v0.4.0]: https://github.com/guangl/sqllog-analysis/releases/tag/v0.4.0
+
 ## [v0.2.1] - 2025-09-20
 ### 新增
 - 基于 DuckDB Appender 的 `Sqllog` 批量写入器，支持可配置的 chunk 大小。
