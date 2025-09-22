@@ -13,16 +13,14 @@ level = "info"
 db_path = "sqllogs.duckdb"
 
 [export]
-# 是否启用导出（功能开发中，当前无效）
+# 是否启用导出
 enabled = false
-# 导出格式：csv/json/excel（待实现）
+# 导出格式：csv/json/excel
 format = "csv"
-# 导出目标路径（待实现）
+# 导出目标路径
 out_path = "exports/out.csv"
-# 是否按线程输出（待实现）
+# 是否按线程输出
 per_thread_out = false
-
-# 写入选项（overwrite_or_ignore / overwrite / append）
 overwrite_or_ignore = false
 overwrite = false
 append = false

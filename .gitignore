@@ -4,3 +4,4 @@ report/*
 error_files.txt
 logs/*
 out.*
+*.duckdb

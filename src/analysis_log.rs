@@ -150,16 +150,46 @@ impl LogConfig {
         // 创建输出层：
         // - stdout_layer: 控制台输出层（根据配置启用/禁用）
         // - file_layer: 文件输出层（始终启用）
-        let stdout_layer =
-            fmt::layer().with_writer(io::stdout).with_filter(stdout_filter);
-        let file_layer =
-            fmt::layer().with_writer(non_blocking).with_filter(filter);
+        // 配置格式包含：时间戳、日志级别、目标模块、文件名:行号、函数名、消息内容
+        let stdout_layer = fmt::layer()
+            .with_writer(io::stdout)
+            .with_target(true) // 显示目标模块
+            .with_file(true) // 显示文件名
+            .with_line_number(true) // 显示行号
+            .with_level(true) // 显示日志级别
+            .with_thread_ids(false) // 不显示线程ID（避免输出过于冗长）
+            .with_thread_names(false)
+            .compact() // 使用紧凑格式
+            .with_filter(stdout_filter);
+
+        let file_layer = fmt::layer()
+            .with_writer(non_blocking)
+            .with_target(true) // 显示目标模块
+            .with_file(true) // 显示文件名
+            .with_line_number(true) // 显示行号
+            .with_level(true) // 显示日志级别
+            .with_thread_ids(true) // 文件中显示线程ID
+            .with_thread_names(true)
+            .compact() // 使用紧凑格式
+            .with_filter(filter);
+
+        // 初始化 tracing-log 兼容性层，使 log crate 的消息能被 tracing 处理
+        // 需要在 registry 初始化之前设置
+        if let Err(e) = tracing_log::LogTracer::init() {
+            // 如果已经初始化过，忽略错误（可能在测试中会发生）
+            eprintln!("警告: log 兼容性层初始化失败: {e}");
+        }
 
         // 注册并初始化 tracing 订阅器
-        tracing_subscriber::registry()
+        // 使用 try_init() 来避免重复初始化问题
+        if let Err(e) = tracing_subscriber::registry()
             .with(stdout_layer)
             .with(file_layer)
-            .init();
+            .try_init()
+        {
+            // 如果已经初始化过（比如在测试中），只打印警告而不返回错误
+            eprintln!("警告: tracing subscriber 已经初始化: {e}");
+        }
 
         // 记录初始化成功信息
         if self.enable_stdout {

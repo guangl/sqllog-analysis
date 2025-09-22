@@ -1,62 +1,64 @@
+//! SQL 日志分析工具 - 程序入口点
+//!
+//! 这是一个高性能的 SQL 日志分析工具，专门用于处理大规模的数据库日志文件，
+//! 提供解析、存储、分析和导出功能。
+//!
+//! ## 工具概述
+//!
+//! 本工具能够：
+//! - **批量处理**：自动发现和处理指定目录下的所有 SQL 日志文件
+//! - **并行解析**：使用多线程并行处理，显著提升大文件的处理速度
+//! - **错误恢复**：智能处理格式异常的日志条目，生成详细的错误报告
+//! - **灵活导出**：支持多种格式的数据导出，便于后续分析
+//!
+//! ## 典型使用场景
+//!
+//! ### 1. 数据库性能分析
+//! ```bash
+//! # 处理性能日志，分析慢查询
+//! sqllog-analysis --input /logs/sqllog/ --export slow_queries.csv
+//! ```
+//!
+//! ### 2. 数据质量检查
+//! ```bash
+//! # 检查日志格式一致性，生成错误报告
+//! sqllog-analysis --input /logs/ --config quality_check.toml
+//! ```
+//!
+//! ### 3. 批量数据迁移
+//! ```bash
+//! # 将日志数据导入数据库供后续分析
+//! sqllog-analysis --input /archive/ --database analytics.db
+//! ```
+//!
+//! ## 程序架构
+//!
+//! ```text
+//! main() → 配置加载 → 日志初始化 → 异常处理 → app::run()
+//!   ↓         ↓          ↓           ↓          ↓
+//! 入口点   TOML解析   tracing设置   panic钩子   业务逻辑
+//! ```
+//!
+//! ## 错误处理策略
+//!
+//! - **配置错误**：立即退出，提供详细的错误信息
+//! - **日志初始化失败**：视为严重错误，退出码 2
+//! - **运行时异常**：记录详细日志和回溯信息，优雅退出
+//! - **数据处理错误**：隔离错误，继续处理其他数据
+
 mod analysis_log;
 mod app;
 
 use analysis_log::LogConfig;
 use sqllog_analysis::config::{Config, RuntimeConfig};
-use std::{
-    backtrace::Backtrace,
-    io, panic, process,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread,
-};
+use std::{backtrace::Backtrace, panic, process};
 
 fn main() {
     let runtime = load_runtime_config();
-
     init_logging(&runtime);
-
     set_panic_hook();
 
-    // 停止标志，用于在接收到 Ctrl-C 时通知正在执行的任务优雅终止
-    let stop = Arc::new(AtomicBool::new(false));
-    register_ctrlc_handler(&stop);
-
-    // 将停止标志传入 app::run（按引用传递以避免不必要的移动）
-    // 同时在后台监听 stdin 中的 stop 指令（交互式环境下）
-    register_stop_command_listener(&stop);
-
-    app::run(&stop);
-}
-
-/// 在后台线程中监听标准输入中的命令；当收到单行命令 `stop` 时，设置停止标志。
-///
-/// 说明：该函数会在交互式环境中启动一个线程持续读取 stdin，遇到 `stop`（不区分大小写）时将停止标志设为 true。
-/// 在非交互式环境（stdin 不可读）时直接返回，不会启动线程。
-fn register_stop_command_listener(stop: &Arc<AtomicBool>) {
-    // 尝试克隆 stdin 的句柄；在某些运行环境下 stdin 可能不可用
-    if atty::isnt(atty::Stream::Stdin) {
-        // 非交互式环境，跳过监听
-        return;
-    }
-
-    let stop = stop.clone();
-    thread::spawn(move || {
-        let stdin = io::stdin();
-        let mut buf = String::new();
-        while stdin.read_line(&mut buf).is_ok() {
-            let cmd = buf.trim().to_lowercase();
-            buf.clear();
-            if cmd == "stop" {
-                log::info!("收到 stop 指令（stdin），设置停止标志");
-                stop.store(true, Ordering::SeqCst);
-                break;
-            }
-            // 允许继续监听其它命令或空行
-        }
-    });
+    app::run();
 }
 
 /// 载入运行时配置。
@@ -104,21 +106,4 @@ fn set_panic_hook() {
         let bt = Backtrace::force_capture();
         log::error!("回溯信息:\n{bt:?}");
     }));
-}
-
-/// 注册 Ctrl-C 处理器；当接收到中断信号时设置停止标志。
-///
-/// 在无法注册处理器的情况下视为严重错误并退出进程。
-fn register_ctrlc_handler(stop: &Arc<AtomicBool>) {
-    if let Err(e) = ctrlc::set_handler({
-        let stop = stop.clone();
-        move || {
-            log::info!("收到中断信号，准备退出（设置停止标志）");
-            stop.store(true, Ordering::SeqCst);
-        }
-    }) {
-        log::error!("无法注册 Ctrl-C 处理器: {e}");
-        // 注册失败属于严重错误，直接退出
-        process::exit(2);
-    }
 }

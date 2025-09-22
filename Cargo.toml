@@ -1,6 +1,6 @@
 [package]
 name = "sqllog-analysis"
-version = "0.4.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["guangl"]
 description = "达梦数据库的 sqllog 日志分析工具"
@@ -18,33 +18,26 @@ anyhow = "1.0.100"
 regex = "1.11"
 lazy_static = "1.5"
 tempfile = "3.22"
-memchr = "2.7"
 thiserror = "2.0"
 log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"
+tracing-log = "0.2"
 chrono = "0.4"
 duckdb = { version = "1.4.0", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.7"
 dirs = "4"
-ctrlc = "3"
-rayon = "1.9"
-once_cell = "1.20"
-atty = "0.2"
 
 [dev-dependencies]
 criterion = "0.7"
-regex = "1.11"
-lazy_static = "1.5"
-chrono = "0.4"
 
 [[bench]]
 name = "datetime_bench"
 harness = false
 
 [[bench]]
-name = "sqllog_bench"
+name = "core_functions_bench"
 harness = false

@@ -9,12 +9,17 @@ fn parse_file_collect<P: AsRef<Path>>(
     let mut errors: Vec<(usize, String, String)> = Vec::new();
     let res = Sqllog::parse_all(
         path.as_ref(),
-        |chunk| {
+        0, // chunk_size 为 0 表示不分块
+        |chunk: &[Sqllog]| {
             for l in chunk.iter() {
                 logs.push(l.clone());
             }
         },
-        |err_chunk| {
+        |err_chunk: &[(
+            usize,
+            String,
+            sqllog_analysis::sqllog::SqllogError,
+        )]| {
             for e in err_chunk.iter() {
                 errors.push((e.0, e.1.clone(), format!("{}", e.2)));
             }
@@ -51,7 +56,7 @@ fn test_from_line_regex_error() {
 
 #[test]
 fn test_from_line_null_fields() {
-    let line = "2025-10-10 10:10:10.100 (EP[1] sess:NULL thrd:NULL user:NULL trxid:NULL stmt:NULL) [SEL]: SELECT";
+    let line = "2025-10-10 10:10:10.100 (EP[1] sess:NULL thrd:NULL user:NULL trxid:NULL stmt:NULL) [SEL]: SELECT 1 EXECTIME: 100(ms) ROWCOUNT: 1 EXEC_ID: 123.";
     let res = Sqllog::from_line(line, 1).unwrap();
     let log = res.unwrap();
     assert_eq!(log.session, None);
@@ -59,13 +64,20 @@ fn test_from_line_null_fields() {
     assert_eq!(log.user, None);
     assert_eq!(log.trx_id, None);
     assert_eq!(log.statement, None);
+    // 严格验证模式下，包含完整 EXECTIME 参数的记录应该正常解析
+    assert_eq!(log.execute_time, Some(100));
+    assert_eq!(log.rowcount, Some(1));
+    assert_eq!(log.execute_id, Some(123));
 }
 
 #[test]
 fn test_from_line_desc_parse_error() {
+    // 宽松解析模式下，缺少 EXECTIME 参数的记录应该解析成功，字段为 None
     let line = "2025-10-10 10:10:10.100 (EP[1] sess:0x1234 thrd:1234 user:SYSDBA trxid:5678 stmt:0xabcd) [SEL]: desc without numbers";
-    let res = Sqllog::from_line(line, 1).unwrap();
-    let log = res.unwrap();
+    let res = Sqllog::from_line(line, 1);
+    // 期望解析成功，但 EXECTIME 相关字段为 None
+    assert!(res.is_ok());
+    let log = res.unwrap().unwrap();
     assert_eq!(log.execute_time, None);
     assert_eq!(log.rowcount, None);
     assert_eq!(log.execute_id, None);
@@ -381,14 +393,12 @@ fn test_from_line_parse_int_error() {
 
 #[test]
 fn test_from_line_desc_regex_group_none() {
-    // DESC_RE 匹配但分组缺失
-    // 构造一个只匹配 EXECTIME，但缺少 ROWCOUNT/EXEC_ID
+    // DESC_RE 匹配但某些捕获组为空时，对应字段应为 None
     let line = "2025-10-10 10:10:10.100 (EP[1] sess:0x1 thrd:1 user:U trxid:1 stmt:0x2) [SEL]: EXECTIME: 123(ms)";
     let res = Sqllog::from_line(line, 1);
-    // 由于 DESC_RE 不完整，execute_time/rowcount/execute_id 都为 None
     assert!(res.is_ok());
     let log = res.unwrap().unwrap();
-    assert_eq!(log.execute_time, None);
+    assert_eq!(log.execute_time, Some(123));
     assert_eq!(log.rowcount, None);
     assert_eq!(log.execute_id, None);
 }
@@ -469,9 +479,12 @@ fn test_from_line_all_option_fields_some() {
 
 #[test]
 fn test_from_line_desc_regex_fail() {
-    // DESC_RE 正则不匹配
+    // 宽松解析模式下，缺少 EXECTIME 参数的记录应该解析成功，字段为 None
     let line = "2025-10-10 10:10:10.100 (EP[1] sess:0x1234 thrd:1234 user:SYSDBA trxid:5678 stmt:0xabcd) [SEL]: no desc info";
-    let log = Sqllog::from_line(line, 1).unwrap().unwrap();
+    let res = Sqllog::from_line(line, 1);
+    // 期望解析成功，但 EXECTIME 相关字段为 None
+    assert!(res.is_ok());
+    let log = res.unwrap().unwrap();
     assert_eq!(log.execute_time, None);
     assert_eq!(log.rowcount, None);
     assert_eq!(log.execute_id, None);

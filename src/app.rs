@@ -1,24 +1,79 @@
-use sqllog_analysis::sqllog::SqllogError;
+//! 应用程序主逻辑模块 - 文件扫描与批处理流程
+//!
+//! 本模块实现了应用程序的核心业务逻辑，包括文件发现、批处理调度
+//! 和结果导出的完整流程。
+//!
+//! ## 核心功能
+//!
+//! ### 1. 智能文件发现
+//! - **模式匹配**：自动识别以 `dmsql_` 开头的 `.log` 文件
+//! - **递归扫描**：支持指定目录下的文件批量发现
+//! - **扩展名过滤**：不区分大小写的 `.log` 扩展名匹配
+//!
+//! ### 2. 批处理管道
+//! ```text
+//! 文件扫描 → 独立数据库处理 → 结果合并 → 数据导出
+//!     ↓            ↓              ↓          ↓
+//!  目录遍历    并行解析处理      临时库整合   CSV输出
+//!  文件筛选    错误收集归档      统计汇总     格式转换
+//! ```
+//!
+//! ### 3. 统一错误处理
+//! - **错误隔离**：单个文件的处理失败不影响其他文件
+//! - **错误聚合**：收集所有处理过程中的错误信息
+//! - **错误报告**：生成详细的错误统计和诊断信息
+//!
+//! ## 处理流程
+//!
+//! 1. **配置加载**：从配置文件和命令行参数构建运行时配置
+//! 2. **文件发现**：扫描指定目录，收集符合规则的日志文件
+//! 3. **批处理执行**：使用独立数据库策略并行处理文件
+//! 4. **结果导出**：将处理结果导出为指定格式（如 CSV）
+//! 5. **统计报告**：输出处理统计信息和性能指标
+//!
+//! ## 设计原则
+//!
+//! - **可扩展性**：支持不同的文件格式和导出格式
+//! - **容错性**：优雅处理各种异常情况
+//! - **性能优化**：并行处理和内存效率优化
+//! - **监控友好**：丰富的日志和统计信息
+
+use sqllog_analysis::config::Config;
+use sqllog_analysis::database::DuckDbProvider;
+use sqllog_analysis::database::{
+    DatabaseProvider, ExportFormat, process_files_with_independent_databases,
+};
+
 use std::fs;
 use std::path;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::thread;
-use std::time::Instant;
-
-use rayon::ThreadPoolBuilder;
-use rayon::prelude::*;
-
-use sqllog_analysis::config::{Config, RuntimeConfig};
-use sqllog_analysis::sqllog::Sqllog;
-use std::fs::OpenOptions;
-use std::io::{BufWriter, Write};
-use std::sync::mpsc::{Sender, channel};
 
 /// 在指定目录中收集符合命名规则的 sqllog 日志文件。
 ///
-/// 规则：文件名以 `dmsql_` 开头且扩展名为 `.log`（不区分大小写）。
+/// ## 文件识别规则
+///
+/// 为了确保处理的是正确的 SQL 日志文件，采用了严格的文件名模式匹配：
+///
+/// - **前缀匹配**：文件名必须以 `dmsql_` 开头
+/// - **扩展名检查**：必须是 `.log` 扩展名（不区分大小写）
+/// - **文件类型**：只处理常规文件，忽略目录和符号链接
+///
+/// ## 典型文件名示例
+///
+/// ✅ **匹配的文件**:
+/// - `dmsql_OA01_20250922_120000.log`
+/// - `dmsql_backup.LOG`
+/// - `dmsql_test.log`
+///
+/// ❌ **不匹配的文件**:
+/// - `sqllog_data.log` (前缀不对)
+/// - `dmsql_data.txt` (扩展名不对)
+/// - `dmsql_backup` (无扩展名)
+///
+/// ## 性能考虑
+///
+/// - **单次扫描**：避免递归搜索，只扫描指定目录
+/// - **延迟过滤**：在迭代过程中过滤，减少内存使用
+/// - **错误恢复**：单个文件访问失败不会中断整个扫描过程
 ///
 /// 参数：
 /// - `sqllog_dir`：要扫描的目录路径。
@@ -46,197 +101,81 @@ fn collect_sqllog_files(sqllog_dir: &path::Path) -> Vec<path::PathBuf> {
     files
 }
 
-/// 创建错误写入线程，如果启用了错误写入功能。
-///
-/// 返回：(发送端, 写入线程句柄) 的元组，如果未启用则都为 None。
-fn create_error_writer(
-    runtime: &RuntimeConfig,
-) -> (Option<Sender<String>>, Option<std::thread::JoinHandle<()>>) {
-    if !runtime.sqllog_write_errors {
-        return (None, None);
-    }
-
-    let out = runtime
-        .sqllog_errors_out_path
-        .clone()
-        .unwrap_or_else(|| path::PathBuf::from("parse_errors.log"));
-
-    let mut opts = OpenOptions::new();
-    opts.create(true).write(true);
-    if runtime.export_options.write_flags.overwrite {
-        opts.truncate(true);
-    }
-
-    match opts.open(out) {
-        Ok(f) => {
-            let (tx, rx) = channel::<String>();
-            let handle = std::thread::spawn(move || {
-                let mut writer = BufWriter::new(f);
-                for msg in rx {
-                    if let Err(e) = writeln!(writer, "{msg}") {
-                        eprintln!("写入解析错误文件失败: {e}");
-                    }
-                }
-                let _ = writer.flush();
-            });
-            (Some(tx), Some(handle))
-        }
-        Err(e) => {
-            log::error!("无法打开解析错误输出文件: {e}");
-            (None, None)
-        }
-    }
-}
-
-/// 发送错误到错误收集器。
-fn send_errors_to_collector(
-    errors_sender: Option<&Sender<String>>,
-    path: &path::Path,
-    errs: &[(usize, String, SqllogError)],
-) {
-    if let Some(tx) = errors_sender {
-        for (ln, raw, e) in errs {
-            let obj = serde_json::json!({
-                "path": path.display().to_string(),
-                "line": ln,
-                "error": e.to_string(),
-                "raw": raw.replace('\n', "\\n"),
-            });
-            let _ = tx.send(obj.to_string());
-        }
-    }
-}
-
-/// 处理单个文件的解析。
-fn process_single_file(
-    path: &path::Path,
-    runtime: &RuntimeConfig,
-    errors_sender: Option<&Sender<String>>,
-    stop: &Arc<AtomicBool>,
-) {
-    if stop.load(Ordering::SeqCst) {
-        log::info!(
-            "线程 {:?} 检测到停止，跳过 {}",
-            thread::current().id(),
-            path.display()
-        );
-        return;
-    }
-
-    log::info!("线程 {:?} 开始解析 {}", thread::current().id(), path.display());
-
-    let start = Instant::now();
-    let mut parsed = 0usize;
-    let mut errors = 0usize;
-
-    let res = if let Some(n) = runtime.sqllog_chunk_size {
-        Sqllog::parse_in_chunks(
-            path,
-            n,
-            |chunk: &[Sqllog]| {
-                parsed = parsed.saturating_add(chunk.len());
-            },
-            |errs: &[(usize, String, SqllogError)]| {
-                errors = errors.saturating_add(errs.len());
-                send_errors_to_collector(errors_sender, path, errs);
-            },
-        )
-    } else {
-        Sqllog::parse_all(
-            path,
-            |chunk: &[Sqllog]| {
-                parsed = parsed.saturating_add(chunk.len());
-            },
-            |errs: &[(usize, String, SqllogError)]| {
-                errors = errors.saturating_add(errs.len());
-                send_errors_to_collector(errors_sender, path, errs);
-            },
-        )
-    };
-
-    match res {
-        Ok(()) => {
-            let dur = start.elapsed();
-            let ms = dur.as_millis();
-            log::info!(
-                "解析完成 {} records={} errors={} duration_ms={}",
-                path.display(),
-                parsed,
-                errors,
-                ms
-            );
-        }
-        Err(e) => {
-            log::error!("解析失败 {}: {}", path.display(), e,);
-        }
-    }
-}
-
-/// 对指定的日志文件列表进行并行解析。
-///
-/// 此函数会使用 rayon 线程池并行处理每个文件。每个工作线程会在解析前和解析中检查 `stop` 标志，
-/// 以便在接收到停止指令时尽快退出。解析过程中按 runtime 配置决定是否按块回调 `Sqllog::parse_in_chunks`。
-///
-/// 参数：
-/// - `files`：待解析文件的路径切片。
-/// - `runtime`：运行时配置，包含线程数、chunk 大小等。
-/// - `stop`：用于在接收到停止指令时中断处理的共享布尔标志（Arc<AtomicBool>）。
-fn process_files(
-    files: &[path::PathBuf],
-    runtime: &RuntimeConfig,
-    stop: &Arc<AtomicBool>,
-) {
-    if files.is_empty() {
-        let dir_display = runtime
-            .sqllog_dir
-            .as_ref()
-            .map_or_else(|| "<none>".to_string(), |p| p.display().to_string());
-
-        log::warn!("在 {dir_display} 中未找到 dmsql_*.log 文件，跳过解析");
-        return;
-    }
-
-    log::info!(
-        "发现 {} 个待解析文件，使用 rayon 线程池（线程数={}）",
-        files.len(),
-        runtime.parser_threads
-    );
-
-    let pool = ThreadPoolBuilder::new()
-        .num_threads(runtime.parser_threads)
-        .build()
-        .expect("failed to build rayon thread pool");
-
-    if stop.load(Ordering::SeqCst) {
-        log::info!("收到停止指令，取消文件解析");
-        return;
-    }
-
-    let (errors_sender, errors_writer_handle) = create_error_writer(runtime);
-
-    pool.install(|| {
-        files.par_iter().for_each(|path| {
-            process_single_file(path, runtime, errors_sender.as_ref(), stop);
-        });
-    });
-
-    if let Some(tx) = errors_sender {
-        drop(tx);
-    }
-    if let Some(handle) = errors_writer_handle {
-        let _ = handle.join();
-    }
-}
-
 /// 程序主逻辑入口（由 `main` 调用），负责加载配置并触发文件扫描与解析。
-///
-/// 参数：
-/// - `stop`：共享停止标志的引用，用于响应 Ctrl-C 或 stdin 的停止指令。
-pub fn run(stop: &Arc<AtomicBool>) {
+pub fn run() {
     let runtime = Config::load();
     if let Some(sqllog_dir) = runtime.sqllog_dir.clone() {
         let files = collect_sqllog_files(&sqllog_dir);
-        process_files(&files, &runtime, stop);
+
+        if files.is_empty() {
+            log::warn!("在 {} 中未找到 dmsql_*.log 文件", sqllog_dir.display());
+            return;
+        }
+
+        log::info!("发现 {} 个待处理文件", files.len());
+
+        // 使用独立数据库处理所有文件（每个线程独立数据库，最后合并）
+        match process_files_with_independent_databases(&files, &runtime) {
+            Ok(stats) => {
+                log::info!("所有文件处理完成！统计信息:");
+                log::info!("  - 处理记录数: {}", stats.records_processed);
+                log::info!("  - 插入记录数: {}", stats.records_inserted);
+                log::info!("  - 处理文件数: {}", stats.files_processed);
+                log::info!(
+                    "  - 临时数据库数: {}",
+                    stats.temp_databases_created
+                );
+
+                // 如果启用了导出功能，执行数据导出
+                if runtime.export_enabled {
+                    if let Some(export_path) = &runtime.export_out_path {
+                        log::info!("开始导出数据...");
+
+                        // 创建数据库提供者进行导出
+                        match DuckDbProvider::new(&runtime) {
+                            Ok(provider) => {
+                                // 解析导出格式
+                                if let Ok(format) = runtime
+                                    .export_format
+                                    .parse::<ExportFormat>()
+                                {
+                                    let path_str =
+                                        export_path.to_string_lossy();
+                                    match provider
+                                        .export_data(format, &path_str)
+                                    {
+                                        Ok(()) => {
+                                            log::info!(
+                                                "数据导出完成: {path_str}"
+                                            );
+                                        }
+                                        Err(e) => {
+                                            log::error!("数据导出失败: {e}");
+                                        }
+                                    }
+                                } else {
+                                    log::error!(
+                                        "不支持的导出格式: {}",
+                                        runtime.export_format
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("创建数据库提供者失败: {e}");
+                            }
+                        }
+                    } else {
+                        log::warn!("导出功能已启用，但未指定导出路径");
+                    }
+                } else {
+                    log::debug!("导出功能未启用");
+                }
+            }
+            Err(e) => {
+                log::error!("处理文件失败: {e}");
+                std::process::exit(1);
+            }
+        }
     } else {
         log::warn!("未配置 sqllog_dir，跳过解析");
     }

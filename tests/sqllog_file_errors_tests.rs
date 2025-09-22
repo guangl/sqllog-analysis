@@ -10,12 +10,17 @@ fn parse_file_collect<P: AsRef<std::path::Path>>(
     let mut errors: Vec<(usize, String, String)> = Vec::new();
     let res = Sqllog::parse_all(
         path.as_ref(),
-        |chunk| {
+        0, // chunk_size 为 0 表示不分块
+        |chunk: &[Sqllog]| {
             for l in chunk.iter() {
                 logs.push(l.clone());
             }
         },
-        |err_chunk| {
+        |err_chunk: &[(
+            usize,
+            String,
+            sqllog_analysis::sqllog::SqllogError,
+        )]| {
             for e in err_chunk.iter() {
                 errors.push((e.0, e.1.clone(), format!("{}", e.2)));
             }
@@ -32,12 +37,12 @@ fn test_from_file_with_errors_success_and_fail() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.log");
     let mut file = File::create(&file_path).unwrap();
-    // 第一段为合法日志
-    writeln!(file, "2025-10-10 10:10:10.100 (EP[1] sess:0x1234 thrd:1234 user:SYSDBA trxid:5678 stmt:0xabcd) [SEL]: SELECT 1").unwrap();
-    // 第二段为非法内容，前面加合法首行，确保分段
+    // 第一段为合法日志（包含完整的 EXECTIME 参数）
+    writeln!(file, "2025-10-10 10:10:10.100 (EP[1] sess:0x1234 thrd:1234 user:SYSDBA trxid:5678 stmt:0xabcd) [SEL]: SELECT 1 EXECTIME: 100(ms) ROWCOUNT: 1 EXEC_ID: 123.").unwrap();
+    // 第二段为缺少 EXECTIME 参数的内容（在宽松模式下仍能成功解析）
     writeln!(file, "2025-10-10 10:10:10.101 (EP[1] sess:0x1234 thrd:1234 user:SYSDBA trxid:5678 stmt:0xabcd) [SEL]: bad log line").unwrap();
     let (logs, errors) = parse_file_collect(&file_path);
-    // 新实现下，两个日志都能被解析为合法记录
+    // 宽松解析模式下，两个日志都能成功解析，第二个的 EXECTIME 字段为 None
     assert_eq!(logs.len(), 2);
     assert_eq!(errors.len(), 0);
 }
