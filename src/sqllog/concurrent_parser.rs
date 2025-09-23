@@ -570,9 +570,10 @@ impl ConcurrentParser {
             failed_count,
             stats
                 .end_time
-                .unwrap_or_default()
-                .duration_since(stats.start_time.unwrap_or_default())
-                .unwrap_or_default()
+                .map(|end| end.duration_since(
+                    stats.start_time.unwrap_or_else(std::time::Instant::now)
+                ))
+                .unwrap_or_else(|| std::time::Duration::from_secs(0))
         );
 
         Ok(stats)

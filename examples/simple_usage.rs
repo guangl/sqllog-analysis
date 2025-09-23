@@ -8,6 +8,35 @@ fn sync_example() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Synchronous Export Example ===");
 
+    // Create a sync SQLite exporter for testing
+    #[cfg(feature = "exporter-sqlite")]
+    {
+        use std::path::PathBuf;
+        let mut sqlite_exporter =
+            SyncSqliteExporter::new(&PathBuf::from("sync_output.sqlite"))?;
+
+        // Create sample data
+        let record = Sqllog {
+            occurrence_time: "2024-09-23 10:00:00.123".to_string(),
+            ep: "1".to_string(),
+            session: Some("0x12345".to_string()),
+            user: Some("admin".to_string()),
+            sql_type: Some("SEL".to_string()),
+            description: "SELECT * FROM users".to_string(),
+            ..Default::default()
+        };
+
+        println!("开始测试SQLite导出器...");
+
+        // Export single record
+        sqlite_exporter.export_record(&record)?;
+
+        // Finalize export
+        sqlite_exporter.finalize()?;
+
+        println!("Sync SQLite export completed!");
+    }
+
     // Create a sync CSV exporter
     #[cfg(feature = "exporter-csv")]
     {

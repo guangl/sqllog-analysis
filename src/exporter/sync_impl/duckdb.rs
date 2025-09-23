@@ -17,8 +17,7 @@ pub struct SyncDuckdbExporter {
 impl SyncDuckdbExporter {
     /// 创建新的同步 DuckDB 导出器
     pub fn new(db_path: &Path) -> Result<Self, SqllogError> {
-        let conn =
-            Connection::open(db_path).map_err(|e| SqllogError::Duckdb)?;
+        let conn = Connection::open(db_path)?;
 
         // 仅创建表，索引将在 finalize 时创建以提高插入性能
         conn.execute(
@@ -41,8 +40,7 @@ impl SyncDuckdbExporter {
             )
             "#,
             [],
-        )
-        .map_err(|e| SqllogError::Duckdb)?;
+        )?;
 
         Ok(Self {
             connection: std::sync::Mutex::new(conn),
@@ -51,7 +49,7 @@ impl SyncDuckdbExporter {
         })
     }
 
-    /// 插入记录到数据库 (同步版本)
+    /// 插入记录到数据库 (同步版本) - 使用 append_rows 批量插入优化
     pub fn insert_records(
         &mut self,
         records: &[Sqllog],
@@ -60,49 +58,43 @@ impl SyncDuckdbExporter {
             return Ok(());
         }
 
-        let mut conn =
-            self.connection.lock().map_err(|e| SqllogError::Duckdb)?;
+        let conn = self.connection.lock().unwrap();
 
-        let tx = conn.transaction().map_err(|e| SqllogError::Duckdb)?;
+        // 使用 DuckDB 的 append_rows 方法进行批量插入
+        let mut appender = conn.appender("sqllogs")?;
 
-        // 预处理 SQL 语句
-        let mut stmt = tx.prepare("
-            INSERT INTO sqllogs (
-                occurrence_time, ep, session, thread, user, trx_id, statement,
-                appname, ip, sql_type, description, execute_time, rowcount, execute_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ").map_err(|e| SqllogError::Duckdb)?;
+        // 准备批量数据：将所有记录转换为数组引用的向量
+        let batch_data: Vec<[&dyn duckdb::ToSql; 14]> = records
+            .iter()
+            .map(|record| {
+                [
+                    &record.occurrence_time as &dyn duckdb::ToSql,
+                    &record.ep as &dyn duckdb::ToSql,
+                    &record.session as &dyn duckdb::ToSql,
+                    &record.thread as &dyn duckdb::ToSql,
+                    &record.user as &dyn duckdb::ToSql,
+                    &record.trx_id as &dyn duckdb::ToSql,
+                    &record.statement as &dyn duckdb::ToSql,
+                    &record.appname as &dyn duckdb::ToSql,
+                    &record.ip as &dyn duckdb::ToSql,
+                    &record.sql_type as &dyn duckdb::ToSql,
+                    &record.description as &dyn duckdb::ToSql,
+                    &record.execute_time as &dyn duckdb::ToSql,
+                    &record.rowcount as &dyn duckdb::ToSql,
+                    &record.execute_id as &dyn duckdb::ToSql,
+                ]
+            })
+            .collect();
 
-        // 批量执行
-        for record in records {
-            let params: [&dyn duckdb::ToSql; 14] = [
-                &record.occurrence_time.to_string(),
-                &record.ep.to_string(),
-                &record.session,
-                &record.thread,
-                &record.user,
-                &record.trx_id,
-                &record.statement,
-                &record.appname,
-                &record.ip,
-                &record.sql_type,
-                &record.description,
-                &record.execute_time,
-                &record.rowcount,
-                &record.execute_id,
-            ];
+        // 批量插入所有行
+        appender.append_rows(batch_data.iter())?;
+        appender.flush()?;
 
-            stmt.execute(params).map_err(|e| SqllogError::Duckdb)?;
-        }
-
-        // 先提交事务
-        drop(stmt);
-        tx.commit().map_err(|e| SqllogError::Duckdb)?;
+        // 显式释放appender
+        drop(appender);
+        drop(conn);
 
         self.stats.exported_records += records.len();
-
-        #[cfg(feature = "logging")]
-        tracing::debug!("DuckDB插入 {} 条记录", records.len());
 
         Ok(())
     }
@@ -117,7 +109,7 @@ impl SyncDuckdbExporter {
         ];
 
         for index_sql in indexes {
-            conn.execute(index_sql, []).map_err(|e| SqllogError::Duckdb)?;
+            conn.execute(index_sql, [])?;
         }
 
         #[cfg(feature = "logging")]
@@ -129,7 +121,14 @@ impl SyncDuckdbExporter {
 
 impl SyncExporter for SyncDuckdbExporter {
     fn name(&self) -> &str {
-        "SyncDuckdbExporter"
+        "DuckDB"
+    }
+
+    fn export_record(
+        &mut self,
+        record: &Sqllog,
+    ) -> Result<(), crate::error::SqllogError> {
+        self.export_batch(&[record.clone()])
     }
 
     fn export_batch(
@@ -140,8 +139,7 @@ impl SyncExporter for SyncDuckdbExporter {
     }
 
     fn finalize(&mut self) -> Result<(), crate::error::SqllogError> {
-        let mut conn =
-            self.connection.lock().map_err(|e| SqllogError::Duckdb)?;
+        let mut conn = self.connection.lock().unwrap();
         Self::create_indexes_sync(&mut conn)?;
         Ok(())
     }

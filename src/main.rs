@@ -35,14 +35,13 @@ fn main() -> Result<()> {
             run_parse_only(&files)
         }
         "export" => {
-            let files = get_file_args(&args[2..]);
-            if files.is_empty() {
+            let options = parse_export_args(&args[2..]);
+            if options.files.is_empty() {
                 eprintln!("错误: 至少需要指定一个日志文件");
                 return Ok(());
             }
-            run_concurrent_export(&files)
+            run_concurrent_export(&options)
         }
-        "demo" => run_demo(),
         "help" | "--help" | "-h" => {
             print_usage(&args[0]);
             Ok(())
@@ -94,6 +93,68 @@ fn print_usage(program_name: &str) {
     println!("  ✗ SQLite 导出 (需要 --features=\"exporter-sqlite\")");
 }
 
+#[derive(Debug)]
+struct ExportOptions {
+    files: Vec<PathBuf>,
+    output: Option<String>,
+    format: Option<String>,
+    batch_size: Option<usize>,
+}
+
+fn parse_export_args(args: &[String]) -> ExportOptions {
+    let mut options = ExportOptions {
+        files: Vec::new(),
+        output: None,
+        format: None,
+        batch_size: None,
+    };
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--output" => {
+                i += 1;
+                if i < args.len() {
+                    options.output = Some(args[i].clone());
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    options.format = Some(args[i].clone());
+                }
+            }
+            "--batch-size" => {
+                i += 1;
+                if i < args.len() {
+                    if let Ok(size) = args[i].parse::<usize>() {
+                        options.batch_size = Some(size);
+                    }
+                }
+            }
+            "--limit" => {
+                i += 1;
+                if i < args.len() {
+                    // 忽略limit参数，不再支持
+                    println!("警告: --limit 参数已被移除");
+                }
+            }
+            _ => {
+                if !arg.starts_with("--") {
+                    let path = PathBuf::from(arg);
+                    if path.exists() {
+                        options.files.push(path);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+
+    options
+}
+
 fn get_file_args(args: &[String]) -> Vec<PathBuf> {
     args.iter().map(|s| PathBuf::from(s)).filter(|p| p.exists()).collect()
 }
@@ -103,11 +164,8 @@ fn run_parse_only(files: &[PathBuf]) -> Result<()> {
     println!("=== 解析模式 ===");
     println!("文件数量: {}", files.len());
 
-    let config = SqllogConfig {
-        thread_count: Some(4), // 最多使用4个线程
-        batch_size: 1000,
-        queue_buffer_size: 5000,
-    };
+    // 使用新的默认配置：batch_size = 0, thread_count = Some(0)
+    let config = SqllogConfig::default();
 
     let parser = ConcurrentParser::new(config);
 
@@ -150,50 +208,96 @@ fn run_parse_only(files: &[PathBuf]) -> Result<()> {
     feature = "exporter-sqlite",
     feature = "exporter-duckdb"
 ))]
-fn run_concurrent_export(files: &[PathBuf]) -> Result<()> {
+fn run_concurrent_export(options: &ExportOptions) -> Result<()> {
     println!("=== 并发导出模式 ===");
-    println!("文件数量: {}", files.len());
+    println!("文件数量: {}", options.files.len());
 
-    let config = SqllogConfig {
-        thread_count: Some(4), // 最多使用4个线程
-        batch_size: 1000,
-        queue_buffer_size: 5000,
-    };
+    // 使用新的默认配置：batch_size = 0, thread_count = Some(0)
+    let mut config = SqllogConfig::default();
+
+    // 应用批量大小配置
+    if let Some(batch_size) = options.batch_size {
+        config.batch_size = batch_size;
+    }
 
     let parser = ConcurrentParser::new(config);
 
     // 创建导出器
     let mut exporters: Vec<Box<dyn SyncExporter + Send>> = Vec::new();
 
-    #[cfg(feature = "exporter-csv")]
-    {
-        println!("添加 CSV 导出器");
-        exporters
-            .push(Box::new(SyncCsvExporter::new("output/export_result.csv")?));
+    // 根据format选项或默认创建导出器
+    let format = options.format.as_deref().unwrap_or("auto");
+    let output_base =
+        options.output.as_deref().unwrap_or("output/export_result");
+
+    // 确保输出目录存在
+    if let Some(parent) = PathBuf::from(output_base).parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
-    #[cfg(feature = "exporter-json")]
-    {
-        println!("添加 JSON 导出器");
-        exporters.push(Box::new(SyncJsonExporter::new(
-            "output/export_result.json",
-        )?));
-    }
+    match format {
+        #[cfg(feature = "exporter-csv")]
+        "csv" => {
+            println!("添加 CSV 导出器");
+            let output_path = format!("{}.csv", output_base);
+            exporters.push(Box::new(SyncCsvExporter::new(&output_path)?));
+        }
+        #[cfg(feature = "exporter-json")]
+        "json" => {
+            println!("添加 JSON 导出器");
+            let output_path = format!("{}.json", output_base);
+            exporters.push(Box::new(SyncJsonExporter::new(&output_path)?));
+        }
+        #[cfg(feature = "exporter-sqlite")]
+        "sqlite" => {
+            println!("添加 SQLite 导出器");
+            let output_path = format!("{}.sqlite", output_base);
+            exporters.push(Box::new(SyncSqliteExporter::new(&PathBuf::from(
+                output_path,
+            ))?));
+        }
+        #[cfg(feature = "exporter-duckdb")]
+        "duckdb" => {
+            println!("添加 DuckDB 导出器");
+            let output_path = format!("{}.duckdb", output_base);
+            exporters.push(Box::new(SyncDuckdbExporter::new(&PathBuf::from(
+                output_path,
+            ))?));
+        }
+        "auto" | _ => {
+            // 自动模式：添加所有可用的导出器
+            #[cfg(feature = "exporter-csv")]
+            {
+                println!("添加 CSV 导出器");
+                let output_path = format!("{}.csv", output_base);
+                exporters.push(Box::new(SyncCsvExporter::new(&output_path)?));
+            }
 
-    #[cfg(feature = "exporter-duckdb")]
-    {
-        println!("添加 DuckDB 导出器");
-        exporters.push(Box::new(SyncDuckdbExporter::new(
-            "output/export_result.db",
-        )?));
-    }
+            #[cfg(feature = "exporter-json")]
+            {
+                println!("添加 JSON 导出器");
+                let output_path = format!("{}.json", output_base);
+                exporters.push(Box::new(SyncJsonExporter::new(&output_path)?));
+            }
 
-    #[cfg(feature = "exporter-sqlite")]
-    {
-        println!("添加 SQLite 导出器");
-        exporters.push(Box::new(SyncSqliteExporter::new(
-            "output/export_result.sqlite",
-        )?));
+            #[cfg(feature = "exporter-duckdb")]
+            {
+                println!("添加 DuckDB 导出器");
+                let output_path = format!("{}.duckdb", output_base);
+                exporters.push(Box::new(SyncDuckdbExporter::new(
+                    &PathBuf::from(output_path),
+                )?));
+            }
+
+            #[cfg(feature = "exporter-sqlite")]
+            {
+                println!("添加 SQLite 导出器");
+                let output_path = format!("{}.sqlite", output_base);
+                exporters.push(Box::new(SyncSqliteExporter::new(
+                    &PathBuf::from(output_path),
+                )?));
+            }
+        }
     }
 
     if exporters.is_empty() {
@@ -207,7 +311,7 @@ fn run_concurrent_export(files: &[PathBuf]) -> Result<()> {
 
     let start = std::time::Instant::now();
     let (errors, stats) =
-        parser.parse_and_export_concurrent(files, exporters)?;
+        parser.parse_and_export_concurrent(&options.files, exporters)?;
     let elapsed = start.elapsed();
 
     println!("\n=== 导出结果 ===");
@@ -239,60 +343,9 @@ fn run_concurrent_export(files: &[PathBuf]) -> Result<()> {
     feature = "exporter-sqlite",
     feature = "exporter-duckdb"
 )))]
-fn run_concurrent_export(_files: &[PathBuf]) -> Result<()> {
+fn run_concurrent_export(_options: &ExportOptions) -> Result<()> {
     println!("导出功能需要启用导出器特性");
     println!("请使用 --features 参数，例如:");
     println!("  cargo run --features=\"exporter-csv,exporter-json\"");
-    Ok(())
-}
-
-/// 运行演示程序
-fn run_demo() -> Result<()> {
-    println!("=== 演示模式 ===");
-
-    // 查找示例文件
-    let demo_files = vec![
-        PathBuf::from("example_output/test_data.log"),
-        PathBuf::from("logs/example.log.2025-09-23"),
-        PathBuf::from("sqllog/dmsql_OA01_20250916_200253.log"),
-    ]
-    .into_iter()
-    .filter(|p| p.exists())
-    .collect::<Vec<_>>();
-
-    if demo_files.is_empty() {
-        println!("没有找到演示文件，创建测试数据...");
-        create_demo_data()?;
-        return run_parse_only(&[PathBuf::from("demo_test.log")]);
-    }
-
-    println!("找到演示文件: {} 个", demo_files.len());
-    for file in &demo_files {
-        println!("  - {}", file.display());
-    }
-
-    run_parse_only(&demo_files)
-}
-
-/// 创建演示数据
-fn create_demo_data() -> Result<()> {
-    use std::fs::File;
-    use std::io::Write;
-
-    let demo_content = r#"2024-01-01 12:00:00.000 (EP[1] sess:session1 thrd:thread1 user:admin trxid:tx001 stmt:SELECT * FROM users) [SEL]: 查询用户表;
-EXECTIME: 100(ms) ROWCOUNT: 50 EXEC_ID: 1001.
-2024-01-01 12:01:00.000 (EP[2] sess:session2 thrd:thread2 user:user1 trxid:tx002 stmt:INSERT INTO logs VALUES (1, 'test')) [INS]: 插入日志记录;
-EXECTIME: 50(ms) ROWCOUNT: 1 EXEC_ID: 1002.
-2024-01-01 12:02:00.000 (EP[1] sess:session1 thrd:thread1 user:admin trxid:tx003 stmt:UPDATE users SET status = 'active') [UPD]: 更新用户状态;
-EXECTIME: 75(ms) ROWCOUNT: 20 EXEC_ID: 1003.
-2024-01-01 12:03:00.000 (EP[3] sess:session3 thrd:thread3 user:admin trxid:tx004 stmt:DELETE FROM temp_table) [DEL]: 删除临时表数据;
-EXECTIME: 25(ms) ROWCOUNT: 5 EXEC_ID: 1004.
-"#;
-
-    let mut file = File::create("demo_test.log")?;
-    file.write_all(demo_content.as_bytes())?;
-
-    println!("创建了演示文件: demo_test.log");
-
     Ok(())
 }

@@ -65,61 +65,46 @@ impl SyncSqliteExporter {
         }
 
         let mut conn = self.connection.lock().unwrap();
-
-        // 设置性能优化参数
-        conn.execute("PRAGMA synchronous = OFF", [])
-            .map_err(SqllogError::Sqlite)?;
-        conn.execute("PRAGMA journal_mode = MEMORY", [])
-            .map_err(SqllogError::Sqlite)?;
-
         let tx = conn.transaction().map_err(SqllogError::Sqlite)?;
 
-        // 预处理 SQL 语句
-        let mut stmt = tx
-            .prepare(
-                r#"
-            INSERT INTO sqllogs (
-                occurrence_time, ep, session, thread, user, trx_id, statement,
-                appname, ip, sql_type, description, execute_time, rowcount, execute_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-            "#,
-            )
-            .map_err(SqllogError::Sqlite)?;
+        let mut successful = 0;
+        let mut failed = 0;
 
-        // 批量执行，使用数组参数避免重复参数绑定开销
-        for record in records {
-            let params: [&dyn rusqlite::ToSql; 14] = [
-                &record.occurrence_time,
-                &record.ep,
-                &record.session,
-                &record.thread,
-                &record.user,
-                &record.trx_id,
-                &record.statement,
-                &record.appname,
-                &record.ip,
-                &record.sql_type,
-                &record.description,
-                &record.execute_time,
-                &record.rowcount,
-                &record.execute_id,
-            ];
+        for record in records.iter() {
+            let result = tx.execute(
+                "INSERT INTO sqllogs (occurrence_time, ep, session, thread, user, trx_id, statement, appname, ip, sql_type, description, execute_time, rowcount, execute_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    record.occurrence_time,
+                    record.ep,
+                    record.session,
+                    record.thread,
+                    record.user,
+                    record.trx_id,
+                    record.statement,
+                    record.appname,
+                    record.ip,
+                    record.sql_type,
+                    record.description,
+                    record.execute_time,
+                    record.rowcount,
+                    record.execute_id,
+                ]
+            );
 
-            stmt.execute(&params).map_err(SqllogError::Sqlite)?;
+            match result {
+                Ok(_) => successful += 1,
+                Err(e) => {
+                    failed += 1;
+                    #[cfg(feature = "logging")]
+                    tracing::warn!("SQLite插入记录失败: {}", e);
+                }
+            }
         }
 
-        // 先提交事务
-        drop(stmt);
         tx.commit().map_err(SqllogError::Sqlite)?;
 
-        // 恢复默认设置
-        conn.execute("PRAGMA synchronous = NORMAL", [])
-            .map_err(SqllogError::Sqlite)?;
-
-        self.stats.exported_records += records.len();
-
-        #[cfg(feature = "logging")]
-        tracing::debug!("SQLite插入 {} 条记录", records.len());
+        self.stats.exported_records += successful;
+        self.stats.failed_records += failed;
 
         Ok(())
     }
@@ -128,6 +113,10 @@ impl SyncSqliteExporter {
 impl SyncExporter for SyncSqliteExporter {
     fn name(&self) -> &str {
         "SQLite"
+    }
+
+    fn export_record(&mut self, record: &Sqllog) -> Result<(), SqllogError> {
+        self.export_batch(&[record.clone()])
     }
 
     fn export_batch(&mut self, records: &[Sqllog]) -> Result<(), SqllogError> {
