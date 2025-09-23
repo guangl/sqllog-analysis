@@ -6,8 +6,16 @@ use crate::config::SqllogConfig;
 use crate::error::{Result, SqllogError};
 use crate::sqllog::{sync_parser::ParseError, types::Sqllog};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::thread;
+
+#[cfg(any(
+    feature = "exporter-csv",
+    feature = "exporter-json",
+    feature = "exporter-sqlite",
+    feature = "exporter-duckdb"
+))]
+use std::sync::Mutex;
 
 #[cfg(any(
     feature = "exporter-csv",
@@ -325,7 +333,12 @@ impl ConcurrentParser {
     }
 
     /// 解析工作线程
-    #[allow(dead_code)]
+    #[cfg(any(
+        feature = "exporter-csv",
+        feature = "exporter-json",
+        feature = "exporter-sqlite",
+        feature = "exporter-duckdb"
+    ))]
     fn parse_worker(
         thread_id: usize,
         task_rx: Arc<Mutex<mpsc::Receiver<ParseTask>>>,
@@ -774,26 +787,22 @@ impl ConcurrentParser {
         Ok((all_records, all_errors))
     }
 
-    /// 解析单个文件的工作线程
-    fn simple_parse_single_file(
+    /// 通用解析文件函数，减少重复代码
+    fn parse_file_to_batch(
         thread_id: usize,
-        file_path: PathBuf,
-        result_tx: mpsc::Sender<ParseBatch>,
+        file_path: &PathBuf,
         batch_size: usize,
-    ) -> Result<()> {
+        task_description: &str,
+    ) -> Result<ParseBatch> {
         #[cfg(feature = "logging")]
-        tracing::debug!(
-            "简化解析线程 {} 处理文件: {}",
-            thread_id,
-            file_path.display()
-        );
+        let task_start_time = std::time::Instant::now();
 
         let mut all_records = Vec::new();
         let mut all_errors = Vec::new();
         let mut batch_counter = 0;
 
         let parse_result = crate::sqllog::SyncSqllogParser::parse_with_hooks(
-            &file_path,
+            file_path,
             batch_size,
             |batch_records, batch_errors| {
                 all_records.extend_from_slice(batch_records);
@@ -802,8 +811,9 @@ impl ConcurrentParser {
 
                 #[cfg(feature = "logging")]
                 tracing::trace!(
-                    "线程 {} 批次 {}: {} 条记录, {} 个错误",
+                    "线程 {} {} 批次 {}: {} 条记录, {} 个错误",
                     thread_id,
+                    task_description,
                     batch_counter,
                     batch_records.len(),
                     batch_errors.len()
@@ -814,36 +824,58 @@ impl ConcurrentParser {
         match parse_result {
             Ok(_) => {
                 #[cfg(feature = "logging")]
-                tracing::debug!(
-                    "线程 {} 成功解析文件: {}，总记录: {}, 总错误: {}, 批次: {}",
-                    thread_id,
-                    file_path.display(),
-                    all_records.len(),
-                    all_errors.len(),
-                    batch_counter
-                );
+                {
+                    let task_elapsed = task_start_time.elapsed();
+                    tracing::info!(
+                        "线程 {} 成功{}: {}，总记录: {}, 总错误: {}, 批次: {}, 耗时: {:?}",
+                        thread_id,
+                        task_description,
+                        file_path.display(),
+                        all_records.len(),
+                        all_errors.len(),
+                        batch_counter,
+                        task_elapsed
+                    );
+                }
 
-                let batch = ParseBatch {
+                Ok(ParseBatch {
                     records: all_records,
                     errors: all_errors,
                     source_file: file_path.clone(),
                     batch_id: batch_counter,
-                };
-
-                if let Err(e) = result_tx.send(batch) {
-                    #[cfg(feature = "logging")]
-                    tracing::error!("线程 {} 发送结果失败: {}", thread_id, e);
-                }
+                })
             }
             Err(e) => {
                 #[cfg(feature = "logging")]
                 tracing::error!(
-                    "线程 {} 解析文件失败: {}, 错误: {}",
+                    "线程 {} {}失败: {}, 错误: {}",
                     thread_id,
+                    task_description,
                     file_path.display(),
                     e
                 );
+                Err(e)
             }
+        }
+    }
+
+    /// 解析单个文件的工作线程
+    fn simple_parse_single_file(
+        thread_id: usize,
+        file_path: PathBuf,
+        result_tx: mpsc::Sender<ParseBatch>,
+        batch_size: usize,
+    ) -> Result<()> {
+        let batch = Self::parse_file_to_batch(
+            thread_id,
+            &file_path,
+            batch_size,
+            "处理单文件",
+        )?;
+
+        if let Err(e) = result_tx.send(batch) {
+            #[cfg(feature = "logging")]
+            tracing::error!("线程 {} 发送结果失败: {}", thread_id, e);
         }
 
         Ok(())
@@ -885,61 +917,14 @@ impl ConcurrentParser {
                 }
             };
 
-            let mut all_records = Vec::new();
-            let mut all_errors = Vec::new();
-            let mut batch_counter = 0;
-
-            #[cfg(feature = "logging")]
-            tracing::debug!(
-                "线程 {} 开始解析共享任务文件: {}",
+            // 使用统一的解析函数
+            match Self::parse_file_to_batch(
                 thread_id,
-                task.file_path.display()
-            );
-
-            // 记录共享解析任务开始时间
-            let task_start_time = std::time::Instant::now();
-
-            let parse_result =
-                crate::sqllog::SyncSqllogParser::parse_with_hooks(
-                    &task.file_path,
-                    batch_size,
-                    |batch_records, batch_errors| {
-                        all_records.extend_from_slice(batch_records);
-                        all_errors.extend_from_slice(batch_errors);
-                        batch_counter += 1;
-
-                        #[cfg(feature = "logging")]
-                        tracing::trace!(
-                            "线程 {} 共享任务批次 {}: {} 条记录, {} 个错误",
-                            thread_id,
-                            batch_counter,
-                            batch_records.len(),
-                            batch_errors.len()
-                        );
-                    },
-                );
-
-            match parse_result {
-                Ok(_) => {
-                    let task_elapsed = task_start_time.elapsed();
-                    #[cfg(feature = "logging")]
-                    tracing::info!(
-                        "线程 {} 成功解析共享任务文件: {}，总记录: {}, 总错误: {}, 批次: {}, 耗时: {:?}",
-                        thread_id,
-                        task.file_path.display(),
-                        all_records.len(),
-                        all_errors.len(),
-                        batch_counter,
-                        task_elapsed
-                    );
-
-                    let batch = ParseBatch {
-                        records: all_records,
-                        errors: all_errors,
-                        source_file: task.file_path.clone(),
-                        batch_id: batch_counter,
-                    };
-
+                &task.file_path,
+                batch_size,
+                "处理共享任务",
+            ) {
+                Ok(batch) => {
                     if let Err(e) = result_tx.send(batch) {
                         #[cfg(feature = "logging")]
                         tracing::error!(
@@ -950,14 +935,11 @@ impl ConcurrentParser {
                     }
                 }
                 Err(e) => {
-                    let task_elapsed = task_start_time.elapsed();
                     #[cfg(feature = "logging")]
                     tracing::error!(
-                        "线程 {} 解析共享任务文件失败: {}, 错误: {}, 耗时: {:?}",
+                        "线程 {} 解析共享任务失败: {}",
                         thread_id,
-                        task.file_path.display(),
-                        e,
-                        task_elapsed
+                        e
                     );
                 }
             }
