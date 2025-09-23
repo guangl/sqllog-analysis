@@ -1,8 +1,9 @@
 //! SQLite 异步数据库导出器
 
 use crate::error::SqllogError;
-use crate::exporter::{AsyncExporter, ExportStats};
+use crate::exporter::ExportStats;
 use crate::sqllog::types::Sqllog;
+use super::AsyncExporter;
 use async_trait::async_trait;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};

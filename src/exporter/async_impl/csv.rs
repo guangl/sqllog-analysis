@@ -1,8 +1,9 @@
 //! CSV 导出器实现 (异步版本)
 
 use crate::error::Result;
-use crate::exporter::{AsyncExporter, ExportStats};
+use crate::exporter::ExportStats;
 use crate::sqllog::types::Sqllog;
+use super::AsyncExporter;
 use async_trait::async_trait;
 use std::path::Path;
 use tokio::fs::File;

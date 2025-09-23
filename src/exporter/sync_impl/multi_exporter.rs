@@ -1,8 +1,9 @@
 //! 同步多导出器管理模块
 
 use crate::error::Result;
-use crate::exporter::{ExportStats, SyncExporter};
+use crate::exporter::ExportStats;
 use crate::sqllog::types::Sqllog;
+use super::SyncExporter;
 
 /// 同步多导出器管理器
 pub struct SyncMultiExporter {

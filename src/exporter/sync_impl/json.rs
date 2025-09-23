@@ -1,8 +1,9 @@
 //! JSON 导出器实现 (同步版本)
 
 use crate::error::Result;
-use crate::exporter::{ExportStats, SyncExporter};
+use crate::exporter::ExportStats;
 use crate::sqllog::types::Sqllog;
+use super::SyncExporter;
 use serde_json;
 use std::io::{BufWriter, Write};
 use std::path::Path;

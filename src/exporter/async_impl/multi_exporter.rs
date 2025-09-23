@@ -1,8 +1,9 @@
 //! 异步多导出器管理模块
 
 use crate::error::Result;
-use crate::exporter::{AsyncExporter, ExportStats};
+use crate::exporter::ExportStats;
 use crate::sqllog::types::Sqllog;
+use super::AsyncExporter;
 use futures::future;
 
 /// 异步多导出器管理器
