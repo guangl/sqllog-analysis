@@ -174,5 +174,8 @@ pub mod prelude {
     pub use crate::exporter::async_impl::AsyncSqliteExporter;
 
     #[cfg(feature = "exporter-duckdb")]
-    pub use crate::exporter::duckdb::DuckdbExporter;
+    pub use crate::exporter::sync_impl::SyncDuckdbExporter;
+
+    #[cfg(all(feature = "exporter-duckdb", feature = "async"))]
+    pub use crate::exporter::async_impl::AsyncDuckdbExporter;
 }

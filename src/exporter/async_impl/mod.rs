@@ -35,6 +35,8 @@ pub trait AsyncExporter: Send + Sync {
 
 #[cfg(feature = "exporter-csv")]
 pub mod csv;
+#[cfg(feature = "exporter-duckdb")]
+pub mod duckdb;
 #[cfg(feature = "exporter-json")]
 pub mod json;
 pub mod multi_exporter;
@@ -43,6 +45,8 @@ pub mod sqlite;
 
 #[cfg(feature = "exporter-csv")]
 pub use csv::AsyncCsvExporter;
+#[cfg(feature = "exporter-duckdb")]
+pub use duckdb::AsyncDuckdbExporter;
 #[cfg(feature = "exporter-json")]
 pub use json::AsyncJsonExporter;
 pub use multi_exporter::AsyncMultiExporter;
