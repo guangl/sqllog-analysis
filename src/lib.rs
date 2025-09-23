@@ -72,7 +72,6 @@
 //! ### 导出器功能
 //! - `exporter-csv` - CSV 导出器
 //! - `exporter-json` - JSON 导出器
-//! - `exporter-excel` - Excel 导出器
 //! - `exporter-sqlite` - SQLite 导出器
 //! - `exporter-duckdb` - DuckDB 导出器
 //! - `all-exporters` - 启用所有导出器
@@ -97,11 +96,8 @@ pub mod sqllog;
 #[cfg(any(
     feature = "exporter-csv",
     feature = "exporter-json",
-    feature = "exporter-excel",
     feature = "exporter-sqlite",
-    feature = "exporter-duckdb",
-    feature = "exporter-postgres",
-    feature = "exporter-oracle"
+    feature = "exporter-duckdb"
 ))]
 pub mod exporter;
 
@@ -141,18 +137,8 @@ pub mod prelude {
     #[cfg(any(
         feature = "exporter-csv",
         feature = "exporter-json",
-        feature = "exporter-excel",
         feature = "exporter-sqlite",
-        feature = "exporter-duckdb",
-    ))]
-    #[cfg(any(
-        feature = "exporter-csv",
-        feature = "exporter-json",
-        feature = "exporter-excel",
-        feature = "exporter-sqlite",
-        feature = "exporter-duckdb",
-        feature = "exporter-postgres",
-        feature = "exporter-oracle"
+        feature = "exporter-duckdb"
     ))]
     pub use crate::exporter::{
         ExportStats, MultiExporter, SyncExporter, SyncMultiExporter,
@@ -163,11 +149,8 @@ pub mod prelude {
         any(
             feature = "exporter-csv",
             feature = "exporter-json",
-            feature = "exporter-excel",
             feature = "exporter-sqlite",
-            feature = "exporter-duckdb",
-            feature = "exporter-postgres",
-            feature = "exporter-oracle"
+            feature = "exporter-duckdb"
         )
     ))]
     pub use crate::exporter::{AsyncExporter, AsyncMultiExporter};
@@ -183,9 +166,6 @@ pub mod prelude {
 
     #[cfg(all(feature = "exporter-json", feature = "async"))]
     pub use crate::exporter::async_impl::AsyncJsonExporter;
-
-    #[cfg(feature = "exporter-excel")]
-    pub use crate::exporter::excel::ExcelExporter;
 
     #[cfg(feature = "exporter-sqlite")]
     pub use crate::exporter::sync_impl::SyncSqliteExporter;

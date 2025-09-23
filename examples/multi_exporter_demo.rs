@@ -11,7 +11,6 @@ async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
         feature = "exporter-csv",
         feature = "exporter-json",
         feature = "exporter-sqlite",
-        feature = "exporter-excel",
         feature = "exporter-duckdb"
     ))]
     use sqllog_analysis::exporter::MultiExporter;
@@ -48,15 +47,6 @@ async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("  - JSON exporter");
     }
 
-    // Add Excel exporter
-    #[cfg(feature = "exporter-excel")]
-    {
-        let excel_path = output_dir.join("output.xlsx");
-        let excel_exporter = ExcelExporter::new(excel_path).await?;
-        multi_exporter.add_exporter(excel_exporter);
-        println!("  - Excel exporter");
-    }
-
     // Add SQLite exporter
     #[cfg(feature = "exporter-sqlite")]
     {
@@ -83,7 +73,8 @@ async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
     // Parse with async streaming and export concurrently
     let start_time = Instant::now();
 
-    let (mut record_rx, mut error_rx) = AsyncSqllogParser::parse_with_hooks(test_file_path, 100).await?;
+    let (mut record_rx, mut error_rx) =
+        AsyncSqllogParser::parse_with_hooks(test_file_path, 100).await?;
 
     // Process records and errors
     let mut total_records = 0usize;
@@ -123,7 +114,10 @@ async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Total records: {}", total_records);
     println!("  Total time: {:.2}s", elapsed.as_secs_f64());
     if total_records > 0 {
-        println!("  Average speed: {:.2} records/sec", total_records as f64 / elapsed.as_secs_f64());
+        println!(
+            "  Average speed: {:.2} records/sec",
+            total_records as f64 / elapsed.as_secs_f64()
+        );
     }
 
     // Show per-exporter statistics
@@ -149,17 +143,23 @@ async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
 async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
     println!("This demo requires the 'async' feature to run");
     println!("Try running with:");
-    println!("  cargo run --features async,all-exporters --example multi_exporter_demo");
+    println!(
+        "  cargo run --features async,all-exporters --example multi_exporter_demo"
+    );
     println!("  or");
-    println!("  cargo run --features async,exporter-csv,exporter-json --example multi_exporter_demo");
+    println!(
+        "  cargo run --features async,exporter-csv,exporter-json --example multi_exporter_demo"
+    );
     Ok(())
 }
 
-async fn create_test_data(output_dir: &std::path::Path) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    #[cfg(feature = "async")]
-    use tokio::fs;
+async fn create_test_data(
+    output_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     #[cfg(not(feature = "async"))]
     use std::fs;
+    #[cfg(feature = "async")]
+    use tokio::fs;
 
     let test_file_path = output_dir.join("test_data.log");
 
@@ -198,9 +198,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         println!("This demo requires the 'async' feature to run");
         println!("Try running with:");
-        println!("  cargo run --features async,all-exporters --example multi_exporter_demo");
+        println!(
+            "  cargo run --features async,all-exporters --example multi_exporter_demo"
+        );
         println!("  or");
-        println!("  cargo run --features async,exporter-csv,exporter-json --example multi_exporter_demo");
+        println!(
+            "  cargo run --features async,exporter-csv,exporter-json --example multi_exporter_demo"
+        );
         Ok(())
     }
 }

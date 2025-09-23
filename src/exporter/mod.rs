@@ -59,17 +59,8 @@ pub use async_impl::AsyncSqliteExporter as SqliteExporter;
 use async_trait::async_trait;
 
 // 重新导出子模块（条件编译）
-#[cfg(feature = "exporter-excel")]
-pub mod excel;
-
 #[cfg(feature = "exporter-duckdb")]
 pub mod duckdb;
-
-#[cfg(feature = "exporter-postgres")]
-pub mod postgres;
-
-#[cfg(feature = "exporter-oracle")]
-pub mod oracle;
 
 /// 数据导出器的统一接口 (异步版本)
 #[cfg(feature = "async")]
