@@ -1,79 +1,24 @@
-//! SQL 日志解析器 - 多行拼接与格式验证
-//!
-//! 本模块实现了一个强健的 SQL 日志解析器，能够处理复杂的多行日志格式，
-//! 并通过严格的格式验证确保数据质量。
-//!
-//! ## 核心特性
-//!
-//! ### 1. 多行内容拼接
-//! - **智能段检测**：通过时间戳模式自动识别新日志记录的开始
-//! - **内容合并**：将 SQL 语句、条件子句等多行内容合并为完整的 description
-//! - **边界处理**：正确处理空白字符、特殊字符和换行符
-//!
-//! ### 2. 严格格式验证
-//! - **参数位置检查**：EXECTIME/ROWCOUNT/EXEC_ID 必须在 description 的最后一行
-//! - **完整性验证**：缺失任何必要参数的记录都被视为格式错误
-//! - **质量保证**：只有完全符合格式的记录才能进入数据库
-//!
-//! ### 3. 错误追踪与恢复
-//! - **详细错误记录**：每个解析失败的记录都包含行号、内容和错误原因
-//! - **错误文件输出**：所有格式异常都写入 `parse_errors.jsonl` 供后续分析
-//! - **处理连续性**：单条记录的解析失败不会影响后续记录的处理
-//!
-//! ## 解析流程
-//!
-//! ```text
-//! 原始日志行 → process_line() → 内容拼接 → flush_content() → from_line()
-//!                                    ↓                           ↓
-//!                              时间戳检测                    格式验证
-//!                                    ↓                           ↓
-//!                              段边界识别                  参数提取
-//!                                    ↓                           ↓
-//!                           多行内容合并              成功 → 数据库
-//!                                                    失败 → 错误文件
-//! ```
-//!
-//! ## 使用示例
-//!
-//! ```rust,no_run
-//! use dm_sqllog_parser::sqllog::Sqllog;
-//! use std::fs::File;
-//! use std::io::{BufRead, BufReader};
-//!
-//! let file = File::open("example.log")?;
-//! let reader = BufReader::new(file);
-//! let mut sqllogs = Vec::new();
-//! let mut errors = Vec::new();
-//!
-//! for (line_num, line_result) in reader.lines().enumerate() {
-//!     let line = line_result?;
-//!     match Sqllog::from_line(&line, line_num + 1) {
-//!         Ok(Some(sqllog)) => sqllogs.push(sqllog),
-//!         Ok(None) => {}, // 跳过空行或无效行
-//!         Err(e) => errors.push((line_num + 1, line.clone(), e)),
-//!     }
-//! }
-//!
-//! println!("解析成功: {} 条记录", sqllogs.len());
-//! println!("解析错误: {} 条记录", errors.len());
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
+//! SQL 日志解析器实现
 
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::doc_markdown)]
-
-use crate::sqllog::types::SqllogError;
-use crate::sqllog::types::{DescNumbers, SResult, Sqllog};
+use crate::error::{Result, SqllogError};
+use crate::sqllog::types::{DescNumbers, Sqllog};
+use crate::sqllog::utils;
 use lazy_static::lazy_static;
 use regex::Regex;
 
-impl Sqllog {
+/// SQL 日志解析器
+pub struct SqllogParser;
+
+impl SqllogParser {
     /// 从单段日志文本解析出 `Sqllog` 结构体。
     ///
     /// 行为：对整个段使用静态正则进行匹配并解析字段，解析成功返回 `Ok(Some(Sqllog))`。
     ///
     /// 错误处理：若正则未匹配或解析字段失败，返回相应的 `SqllogError`（例如 `Format`）。
-    pub fn from_line(segment: &str, line_num: usize) -> SResult<Option<Self>> {
+    pub fn parse_segment(
+        segment: &str,
+        line_num: usize,
+    ) -> Result<Option<Sqllog>> {
         // 静态正则表达式，提升性能
         lazy_static! {
             static ref SQLLOG_RE: Regex = Regex::new(r"(?s)(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \(EP\[(\d+)\] sess:(NULL|0x[0-9a-f]+) thrd:(-1|NULL|\d+) user:(NULL|\w+) trxid:(NULL|\d+) stmt:(NULL|0x[0-9a-f]+)(?:\sappname:(.*?))?(?:\sip(?::(?:::ffff:)?([0-9]{1,3}(?:\.[0-9]{1,3}){3}))?)?\)\s(?:\[(INS|DEL|ORA|UPD|SEL)\]:?\s)?((?:.|\n)*)").unwrap();
@@ -107,7 +52,7 @@ impl Sqllog {
         caps: &regex::Captures,
         segment: &str,
         line_num: usize,
-    ) -> SResult<Self> {
+    ) -> Result<Sqllog> {
         let occurrence_time = Self::get_capture(caps, 1, line_num, segment)?;
         let ep = Self::get_capture(caps, 2, line_num, segment)?;
 
@@ -128,11 +73,19 @@ impl Sqllog {
         let statement = Self::parse_optional(caps, 7, line_num, segment)?;
         let appname = caps.get(8).and_then(|m| {
             let s = m.as_str();
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         });
         let ip = caps.get(9).and_then(|m| {
             let s = m.as_str();
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         });
         let sql_type = caps.get(10).map(|m| m.as_str().to_string());
         let description = Self::get_capture(caps, 11, line_num, segment)?;
@@ -140,7 +93,7 @@ impl Sqllog {
         let (execute_time, rowcount, execute_id): DescNumbers =
             Self::parse_desc_numbers(&description, line_num);
 
-        Ok(Self {
+        Ok(Sqllog {
             occurrence_time,
             ep,
             session,
@@ -172,7 +125,7 @@ impl Sqllog {
         idx: usize,
         line_num: usize,
         seg: &str,
-    ) -> Result<String, SqllogError> {
+    ) -> Result<String> {
         caps.get(idx)
             .map(|m| m.as_str().to_string())
             .ok_or_else(|| Self::format_err(line_num, seg))
@@ -186,7 +139,7 @@ impl Sqllog {
         idx: usize,
         line_num: usize,
         seg: &str,
-    ) -> Result<Option<String>, SqllogError> {
+    ) -> Result<Option<String>> {
         match caps.get(idx).map(|m| m.as_str()) {
             Some("NULL") => Ok(None),
             Some(s) => Ok(Some(s.to_string())),
@@ -255,7 +208,7 @@ impl Sqllog {
         })
     }
 
-    /// 将当前拼接的 `content` 刷新为 `Sqllog`：调用 `from_line` 并将结果写入 `sqllogs` 或 `errors`。
+    /// 将当前拼接的 `content` 刷新为 `Sqllog`：调用 `parse_segment` 并将结果写入 `sqllogs` 或 `errors`。
     ///
     /// ## 核心逻辑
     ///
@@ -277,10 +230,10 @@ impl Sqllog {
     /// - `line_num`: 段起始行号，便于定位问题
     /// - `content`: 完整的原始内容，便于人工检查
     /// - `error`: 具体的错误类型和描述
-    pub(crate) fn flush_content(
+    pub fn flush_content(
         content: &str,
         line_num: usize,
-        sqllogs: &mut Vec<Self>,
+        records: &mut Vec<Sqllog>,
         errors: &mut Vec<(usize, String, SqllogError)>,
     ) {
         // 忽略仅包含空白或换行的段，避免将其作为格式错误上报
@@ -288,8 +241,8 @@ impl Sqllog {
             return;
         }
 
-        match Self::from_line(content, line_num) {
-            Ok(Some(log)) => sqllogs.push(log),
+        match Self::parse_segment(content, line_num) {
+            Ok(Some(log)) => records.push(log),
             Ok(None) => errors.push((
                 line_num,
                 content.to_string(),
@@ -338,20 +291,19 @@ impl Sqllog {
         has_first_row: &mut bool,
         content: &mut String,
         line_num: &mut usize,
-        sqllogs: &mut Vec<Self>,
+        records: &mut Vec<Sqllog>,
         errors: &mut Vec<(usize, String, SqllogError)>,
     ) {
         // 为了兼容可能带有前导空白的日志行，仅在检测和插入内容时去除前导空白与替换字符。
         // 同时移除行尾的 CR/LF，否则会导致 description 包含多余的尾部换行（测试期望没有）。
         let tmp = line_str.trim_start_matches(&[' ', '\t', '\u{FFFD}'][..]);
         let clean = tmp.trim_end_matches(&['\r', '\n'][..]);
-        let is_new_segment =
-            clean.get(0..23).is_some_and(crate::sqllog::utils::is_first_row);
+        let is_new_segment = clean.get(0..23).is_some_and(utils::is_first_row);
 
         if is_new_segment {
             *has_first_row = true;
             if !content.is_empty() {
-                Self::flush_content(content, *line_num, sqllogs, errors);
+                Self::flush_content(content, *line_num, records, errors);
                 content.clear();
             }
             *line_num = 1;
@@ -362,5 +314,45 @@ impl Sqllog {
         }
         content.push_str(clean);
         *line_num += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_simple_log() {
+        let log_content = r#"2024-01-01 12:00:00.000 (EP[1] sess:NULL thrd:NULL user:NULL trxid:NULL stmt:NULL) [SEL]: SELECT * FROM users;
+EXECTIME: 100(ms) ROWCOUNT: 5 EXEC_ID: 123."#;
+
+        let result = SqllogParser::parse_segment(log_content, 1).unwrap();
+        assert!(result.is_some());
+
+        let log = result.unwrap();
+        assert_eq!(log.occurrence_time, "2024-01-01 12:00:00.000");
+        assert_eq!(log.ep, "1");
+        assert_eq!(log.sql_type, Some("SEL".to_string()));
+        assert_eq!(log.execute_time, Some(100));
+        assert_eq!(log.rowcount, Some(5));
+        assert_eq!(log.execute_id, Some(123));
+    }
+
+    #[test]
+    fn test_parse_invalid_log() {
+        let invalid_content = "This is not a valid log";
+        let result = SqllogParser::parse_segment(invalid_content, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_desc_numbers() {
+        let desc =
+            "SELECT * FROM users\nEXECTIME: 100(ms) ROWCOUNT: 5 EXEC_ID: 123.";
+        let (exec_time, rowcount, exec_id) =
+            SqllogParser::parse_desc_numbers(desc, 1);
+        assert_eq!(exec_time, Some(100));
+        assert_eq!(rowcount, Some(5));
+        assert_eq!(exec_id, Some(123));
     }
 }

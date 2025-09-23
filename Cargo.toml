@@ -1,11 +1,11 @@
 [package]
-name = "dm-sqllog-parser"
+name = "sqllog-analysis"
 version = "1.0.0"
-edition = "2024"
+edition = "2021"
 authors = ["guangl"]
-description = "达梦数据库的 sqllog 日志解析工具"
+description = "达梦数据库的 sqllog 日志解析和分析工具库"
 license = "MIT"
-repository = "https://github.com/guangl/dm-sqllog-parser"
+repository = "https://github.com/guangl/sqllog-analysis"
 keywords = ["database", "log", "analysis", "dm", "rust"]
 categories = [
   "command-line-utilities",
@@ -13,55 +13,20 @@ categories = [
   "data-processing",
 ]
 
+[lib]
+name = "sqllog_analysis"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sqllog-cli"
+path = "src/main.rs"
+
 [dependencies]
-anyhow = "1.0.100"
+# 核心依赖
 regex = "1.11"
 lazy_static = "1.5"
-tempfile = "3.22"
 thiserror = "2.0"
-log = "0.4"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-tracing-appender = "0.2"
-tracing-log = "0.2"
-chrono = "0.4"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"                                                         # 核心模块需要用于错误输出
-toml = "0.7"
-dirs = "4"
 
-# 数据库相关依赖（可选）
-duckdb = { version = "1.4.0", features = ["bundled"], optional = true }
-rusqlite = { version = "0.31", features = ["bundled"], optional = true }
-
-[features]
-# 默认功能：只包含核心 sqllog 解析功能
-default = ["core"]
-
-# 核心功能：sqllog 解析和基本配置
-core = []
-
-# 导出到数据库功能
-export-duckdb = ["dep:duckdb"]
-export-sqlite = ["dep:rusqlite"]
-
-# 导出到文件功能
-export-csv = []
-export-json = []
-
-# 便捷组合
-all-exports = ["export-duckdb", "export-sqlite", "export-csv", "export-json"]
-database-only = ["export-duckdb", "export-sqlite"]
-file-only = ["export-csv", "export-json"]
-minimal = ["core"]
-
-[dev-dependencies]
-criterion = "0.7"
-
-[[bench]]
-name = "datetime_bench"
-harness = false
-
-[[bench]]
-name = "core_functions_bench"
-harness = false
+# 日志依赖
+log = "0.4"

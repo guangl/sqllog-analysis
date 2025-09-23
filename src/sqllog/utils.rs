@@ -1,4 +1,7 @@
-use crate::sqllog::types::{self, SqllogError};
+//! SQL 日志解析的工具函数
+
+use crate::error::SqllogError;
+use crate::sqllog::types;
 use std::{borrow::Cow, str};
 
 /// 判断年份是否为闰年

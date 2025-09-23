@@ -5,7 +5,7 @@ level = "debug"
 
 [sqllog]
 sqllog_dir = "sqllog"
-chunk_size = 0
+chunk_size = 10000
 write_errors = true
 thread_count = 4
 errors_out_path = "parse_errors.jsonl"
