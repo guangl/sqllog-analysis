@@ -1,7 +1,8 @@
 /target
 sqllog/*
-report/*
-error_files.txt
 logs/*
-out.*
 *.duckdb
+*.sqlite
+*.csv
+*.json
+*.jsonl

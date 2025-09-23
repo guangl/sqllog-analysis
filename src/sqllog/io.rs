@@ -24,7 +24,7 @@ impl Sqllog {
     /// 返回值：
     /// - `Ok(())` 表示成功完成文件解析（解析错误通过 `err_hook` 上报，不会作为返回错误）。
     /// - `Err(SqllogError::Io(_))` 表示在打开或读取文件时发生 I/O 错误。
-    pub fn parse_all<P, F, EF>(
+    pub fn parse_in_chunks<P, F, EF>(
         path: P,
         chunk_size: usize,
         hook: F,
@@ -38,32 +38,6 @@ impl Sqllog {
         // chunk_size 为 0 时表示不分块，传递 None 给 stream_parse
         let chunk_opt = if chunk_size == 0 { None } else { Some(chunk_size) };
         Self::stream_parse(path, chunk_opt, hook, err_hook)
-    }
-
-    /// 按块解析文件，每次最多 `chunk_size` 条记录，并在每个块解析完成后调用 `hook`。
-    ///
-    /// 参数说明：
-    /// - `path`: 要解析的文件路径。
-    /// - `chunk_size`: 每次回调时包含的最大记录数。
-    /// - `hook`: 当收集到一块记录时被调用，接收记录切片 `&[Sqllog]`。
-    /// - `err_hook`: 当解析过程中遇到错误时被调用，接收错误列表 `&[(usize, String, SqllogError)]`。
-    ///
-    /// # Errors
-    /// - `SqllogError::Io(_)` - 文件打开或读取时发生 I/O 错误
-    ///
-    /// 返回值与 `parse_all` 类似：I/O 错误会以 `Err(SqllogError::Io(_))` 返回，解析错误通过 `err_hook` 上报。
-    pub fn parse_in_chunks<P, F, EF>(
-        path: P,
-        chunk_size: usize,
-        hook: F,
-        err_hook: EF,
-    ) -> Result<(), SqllogError>
-    where
-        P: AsRef<std::path::Path>,
-        F: FnMut(&[Self]),
-        EF: FnMut(&[(usize, String, SqllogError)]),
-    {
-        Self::stream_parse(path, Some(chunk_size), hook, err_hook)
     }
 
     /// 流式解析实现（内部使用）。

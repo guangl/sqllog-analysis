@@ -6,7 +6,7 @@
 
 ### 🚀 首个稳定版本发布
 
-经过全面的功能开发、测试验证和质量保证，sqllog-analysis v1.0.0 正式发布！这标志着项目从实验性工具升级为生产就绪的企业级解决方案。
+经过全面的功能开发、测试验证和质量保证，dm-sqllog-parser v1.0.0 正式发布！这标志着项目从实验性工具升级为生产就绪的企业级解决方案。
 
 ### ✨ 核心功能完整实现
 
@@ -150,7 +150,7 @@ chunk_size = 1000
 # 是否使用内存数据库
 use_in_memory = false
 # 数据库文件路径
-db_path = "sqllog_analysis.duckdb"
+db_path = "dm_sqllog_parser.duckdb"
 
 [export]
 # 单文件大小限制（字节，不能为 0）
@@ -248,7 +248,7 @@ file_size_bytes = 104857600
 
 ---
 
-[v0.4.0]: https://github.com/guangl/sqllog-analysis/releases/tag/v0.4.0
+[v0.4.0]: https://github.com/guangl/dm-sqllog-parser/releases/tag/v0.4.0
 
 ## [v0.2.1] - 2025-09-20
 ### 新增
@@ -265,7 +265,7 @@ file_size_bytes = 104857600
 ### 修复
 - 解决 Clippy pedantic 报告的问题并进行若干小的重构。
 
-[v0.2.1]: https://github.com/guangl/sqllog-analysis/releases/tag/v0.2.1
+[v0.2.1]: https://github.com/guangl/dm-sqllog-parser/releases/tag/v0.2.1
 
 ## [v0.3.0] - 2025-09-21
 ### 新增 / 调整
@@ -275,7 +275,7 @@ file_size_bytes = 104857600
 ### 兼容性说明
 - 配置字段名、SQL 语句与导出格式 token 保持不变，现有 `config.toml` 文件应与本次发布兼容。
 
-[v0.3.0]: https://github.com/guangl/sqllog-analysis/releases/tag/v0.3.0
+[v0.3.0]: https://github.com/guangl/dm-sqllog-parser/releases/tag/v0.3.0
 
 ## [v0.3.1] - 2025-09-22
 ### 新增 / 改进
@@ -294,4 +294,4 @@ file_size_bytes = 104857600
 ### 兼容性说明
 - 新增的解析 API 向后兼容大多数使用场景，但旧的 `from_file_with_errors` 等已被移除或替换，使用前请查看 API 文档并更新调用处。
 
-[v0.3.1]: https://github.com/guangl/sqllog-analysis/releases/tag/v0.3.1
+[v0.3.1]: https://github.com/guangl/dm-sqllog-parser/releases/tag/v0.3.1

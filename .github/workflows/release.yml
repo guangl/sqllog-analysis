@@ -12,7 +12,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  BINARY_NAME: sqllog-analysis # 二进制文件名
+  BINARY_NAME: dm-sqllog-parser # 二进制文件名
 
 jobs:
   create-release:
@@ -52,10 +52,7 @@ jobs:
             target: aarch64-pc-windows-msvc
             suffix: .exe
 
-          # macOS targets
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            suffix: ""
+          # macOS targets (only ARM64)
           - os: macos-latest
             target: aarch64-apple-darwin
             suffix: ""
@@ -67,6 +64,7 @@ jobs:
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             suffix: ""
+        features: [core, export-csv]
 
     steps:
       - uses: actions/checkout@v4
@@ -82,42 +80,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
       - name: Build binary
         run: |
-          cargo build --release --target ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }} --features ${{ matrix.features }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           RUSTFLAGS: "-C target-feature=+crt-static" # 静态链接，减少依赖
 
-      - name: Prepare archive
+      - name: Prepare binary for upload
         shell: bash
         run: |
-          # 设置档案名称
-          ARCHIVE_NAME=${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}
-
-          # 创建临时目录
-          mkdir -p "dist/${ARCHIVE_NAME}"
-
-          # 复制二进制文件和其他文件
-          cp "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}${{ matrix.suffix }}" "dist/${ARCHIVE_NAME}/"
-          cp README.md LICENSE* "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
-
-          # 进入目录并创建压缩文件
-          cd dist
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            7z a -tzip "${ARCHIVE_NAME}.zip" "${ARCHIVE_NAME}"
-            echo "ASSET_PATH=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
-            echo "ASSET_NAME=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
-          else
-            tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
-            echo "ASSET_PATH=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
-            echo "ASSET_NAME=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
-          fi
+          # 创建带有功能特性标识的文件名
+          BINARY_NAME_WITH_FEATURES=${{ env.BINARY_NAME }}-${{ matrix.features }}-${{ matrix.target }}${{ matrix.suffix }}
+          cp "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}${{ matrix.suffix }}" "$BINARY_NAME_WITH_FEATURES"
+          echo "UPLOAD_FILE=$BINARY_NAME_WITH_FEATURES" >> $GITHUB_ENV
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
-          files: ./dist/${{ env.ASSET_PATH }}
+          files: ${{ env.UPLOAD_FILE }}
           tag_name: ${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

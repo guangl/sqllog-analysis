@@ -41,12 +41,12 @@ pub const DAYS_IN_MONTH: [u8; 12] =
     [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /// 单条 SQL 日志结构体，包含所有解析字段
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct Sqllog {
     /// 日志发生时间
     pub occurrence_time: String,
     /// EP 标识
-    pub ep: i32,
+    pub ep: String,
     /// 会话 ID
     pub session: Option<String>,
     /// 线程 ID

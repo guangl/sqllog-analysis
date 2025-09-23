@@ -36,7 +36,7 @@
 //! ## 使用示例
 //!
 //! ```rust,no_run
-//! use sqllog_analysis::sqllog::Sqllog;
+//! use dm_sqllog_parser::sqllog::Sqllog;
 //! use std::fs::File;
 //! use std::io::{BufRead, BufReader};
 //!
@@ -109,9 +109,7 @@ impl Sqllog {
         line_num: usize,
     ) -> SResult<Self> {
         let occurrence_time = Self::get_capture(caps, 1, line_num, segment)?;
-        let ep: i32 = Self::get_capture(caps, 2, line_num, segment)?
-            .parse()
-            .map_err(|_| Self::format_err(line_num, segment))?;
+        let ep = Self::get_capture(caps, 2, line_num, segment)?;
 
         let session = Self::parse_optional(caps, 3, line_num, segment)?;
         let thread = match caps.get(4).map(|m| m.as_str()) {

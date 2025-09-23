@@ -16,19 +16,19 @@
 //! ### 1. 数据库性能分析
 //! ```bash
 //! # 处理性能日志，分析慢查询
-//! sqllog-analysis --input /logs/sqllog/ --export slow_queries.csv
+//! dm-sqllog-parser --input /logs/sqllog/ --export slow_queries.csv
 //! ```
 //!
 //! ### 2. 数据质量检查
 //! ```bash
 //! # 检查日志格式一致性，生成错误报告
-//! sqllog-analysis --input /logs/ --config quality_check.toml
+//! dm-sqllog-parser --input /logs/ --config quality_check.toml
 //! ```
 //!
 //! ### 3. 批量数据迁移
 //! ```bash
 //! # 将日志数据导入数据库供后续分析
-//! sqllog-analysis --input /archive/ --database analytics.db
+//! dm-sqllog-parser --input /archive/ --database analytics.db
 //! ```
 //!
 //! ## 程序架构
@@ -46,11 +46,10 @@
 //! - **运行时异常**：记录详细日志和回溯信息，优雅退出
 //! - **数据处理错误**：隔离错误，继续处理其他数据
 
-mod analysis_log;
 mod app;
 
-use analysis_log::LogConfig;
-use sqllog_analysis::config::{Config, RuntimeConfig};
+use dm_sqllog_parser::core::analysis_log::LogConfig;
+use dm_sqllog_parser::core::{Config, RuntimeConfig};
 use std::{backtrace::Backtrace, panic, process};
 
 fn main() {

@@ -3,23 +3,48 @@ enable_stdout = true
 log_dir = "logs"
 level = "debug"
 
-[database]
-db_path = "sqllogs.duckdb"
-use_in_memory = false
-overwrite_db = false
-
-[export]
-enabled = true
-format = "csv"
-out_path = "sqllogs.csv"
-per_thread_out = false
-overwrite_or_ignore = false
-overwrite = false
-append = false
-# file_size_bytes = 104857600
-
 [sqllog]
 sqllog_dir = "sqllog"
 chunk_size = 0
 write_errors = true
+thread_count = 4
 errors_out_path = "parse_errors.jsonl"
+
+[export.csv]
+out_path = "sqllogs.csv"
+overwrite = false
+append = false
+file_size_bytes = 0
+
+[export.excel]
+out_path = "sqllogs.xlsx"
+overwrite = false
+append = false
+file_size_bytes = 0
+
+[export.json]
+out_path = "sqllogs.json"
+overwrite = false
+append = false
+file_size_bytes = 0
+
+[export.duckdb]
+out_path = "sqllogs.duckdb"
+table_name = "sqllogs"
+overwrite = false
+append = false
+
+[export.sqlite]
+out_path = "sqllogs.sqlite"
+table_name = "sqllogs"
+overwrite = false
+append = false
+
+[export.postgres]
+host = "localhost"
+port = 5432
+username = "user"
+password = "password"
+database = "sqllogs_db"
+table_name = "sqllogs"
+append = false
