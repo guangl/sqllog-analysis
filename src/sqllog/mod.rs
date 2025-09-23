@@ -2,6 +2,7 @@
 //!
 //! 提供 SQL 日志的解析、类型定义和工具函数
 
+pub mod concurrent_parser;
 pub mod parser;
 pub mod sync_parser;
 pub mod types;
@@ -11,6 +12,7 @@ pub mod utils;
 pub mod async_parser;
 
 // 重新导出核心类型和函数
+pub use concurrent_parser::{ConcurrentParser, ExportTask, ParseTask};
 pub use parser::SqllogParser;
 pub use sync_parser::{ParseError, ParseResult, SyncSqllogParser};
 pub use types::{DescNumbers, Sqllog};

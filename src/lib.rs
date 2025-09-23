@@ -87,6 +87,7 @@
 //! - [`exporter`] - 数据导出相关功能（需要相应的 exporter 特性）
 //!
 
+pub mod config;
 pub mod error;
 #[cfg(feature = "logging")]
 pub mod logging;
@@ -127,7 +128,8 @@ pub mod prelude {
     pub use crate::error::{Result, SqllogError};
     pub use crate::sqllog::types::Sqllog;
     pub use crate::sqllog::{
-        ParseError, ParseResult, SqllogParser, SyncSqllogParser,
+        ConcurrentParser, ParseError, ParseResult, SqllogParser,
+        SyncSqllogParser,
     };
 
     #[cfg(feature = "async")]
