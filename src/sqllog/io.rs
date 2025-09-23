@@ -55,7 +55,8 @@ impl SqllogFileParser {
         F: FnMut(&[Sqllog], &[ParseError]),
     {
         let path_ref = path.as_ref();
-        log::debug!(
+        #[cfg(feature = "logging")]
+        tracing::debug!(
             "开始解析文件: {}, chunk_size = {}",
             path_ref.display(),
             chunk_size
@@ -74,7 +75,10 @@ impl SqllogFileParser {
             let line_str = match line {
                 Ok(line) => line,
                 Err(e) => {
-                    log::warn!("读取行 {} 时出错: {}", line_num, e);
+                    #[cfg(feature = "logging")]
+                    tracing::warn!("读取行 {} 时出错: {}", line_num, e);
+                    #[cfg(not(feature = "logging"))]
+                    let _ = e; // 避免未使用变量警告
                     line_num += 1;
                     continue;
                 }
@@ -133,7 +137,8 @@ impl SqllogFileParser {
             hook(&records, &errors);
         }
 
-        log::debug!(
+        #[cfg(feature = "logging")]
+        tracing::debug!(
             "文件解析完成，共处理 {} 条记录，{} 个错误",
             records.len(),
             raw_errors.len()

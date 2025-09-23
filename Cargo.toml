@@ -1,17 +1,13 @@
 [package]
 name = "sqllog-analysis"
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
 authors = ["guangl"]
 description = "达梦数据库的 sqllog 日志解析和分析工具库"
 license = "MIT"
 repository = "https://github.com/guangl/sqllog-analysis"
-keywords = ["database", "log", "analysis", "dm", "rust"]
-categories = [
-  "command-line-utilities",
-  "development-tools::debugging",
-  "data-processing",
-]
+keywords = []
+categories = []
 
 [lib]
 name = "sqllog_analysis"
@@ -28,5 +24,19 @@ lazy_static = "1.5"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 
-# 日志依赖
-log = "0.4"
+# 日志依赖（可选）
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+    "time",
+], optional = true }
+tracing-appender = { version = "0.2", optional = true }
+
+# 异步运行时支持
+tokio = { version = "1.0", features = ["full"], optional = true }
+
+[features]
+default = ["logging"]
+logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
+tokio = ["dep:tokio"]

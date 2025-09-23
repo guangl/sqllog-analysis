@@ -26,17 +26,17 @@ impl SqllogParser {
 
         // 只对完整段做正则匹配
         if let Some(caps) = SQLLOG_RE.captures(segment) {
-            log::trace!("行{line_num} 匹配到 SQLLOG 正则，开始解析字段");
+            #[cfg(feature = "logging")]
+            tracing::trace!(line = line_num, "匹配到 SQLLOG 正则，开始解析字段");
             // 将字段解析提取到私有方法，减少本方法长度
             let log = Self::parse_fields(&caps, segment, line_num)?;
-            log::trace!("行{line_num} 字段解析成功");
+            #[cfg(feature = "logging")]
+            tracing::trace!(line = line_num, "字段解析成功");
             Ok(Some(log))
         } else {
-            log::trace!("行{line_num} 未匹配到 SQLLOG 正则，内容: {segment}");
-            Err(SqllogError::Format {
-                line: line_num,
-                content: segment.to_string(),
-            })
+            #[cfg(feature = "logging")]
+            tracing::trace!(line = line_num, segment = %segment, "未匹配到 SQLLOG 正则");
+            Err(SqllogError::format_error(line_num, segment.to_string()))
         }
     }
 
@@ -62,10 +62,10 @@ impl SqllogParser {
             Some("-1") => Some("-1".to_string()),
             Some(s) => Some(s.to_string()),
             None => {
-                return Err(SqllogError::Format {
-                    line: line_num,
-                    content: segment.to_string(),
-                });
+                return Err(SqllogError::format_error(
+                    line_num,
+                    segment.to_string(),
+                ));
             }
         };
         let user = Self::parse_optional(caps, 5, line_num, segment)?;
@@ -73,19 +73,11 @@ impl SqllogParser {
         let statement = Self::parse_optional(caps, 7, line_num, segment)?;
         let appname = caps.get(8).and_then(|m| {
             let s = m.as_str();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
-            }
+            if s.is_empty() { None } else { Some(s.to_string()) }
         });
         let ip = caps.get(9).and_then(|m| {
             let s = m.as_str();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
-            }
+            if s.is_empty() { None } else { Some(s.to_string()) }
         });
         let sql_type = caps.get(10).map(|m| m.as_str().to_string());
         let description = Self::get_capture(caps, 11, line_num, segment)?;
@@ -143,16 +135,13 @@ impl SqllogParser {
         match caps.get(idx).map(|m| m.as_str()) {
             Some("NULL") => Ok(None),
             Some(s) => Ok(Some(s.to_string())),
-            None => Err(SqllogError::Format {
-                line: line_num,
-                content: seg.to_string(),
-            }),
+            None => Err(SqllogError::format_error(line_num, seg.to_string())),
         }
     }
 
     /// 构造 `SqllogError::Format` 错误，包含行号与原始内容字符串。
     fn format_err(line: usize, content: &str) -> SqllogError {
-        SqllogError::Format { line, content: content.to_string() }
+        SqllogError::format_error(line, content.to_string())
     }
 
     /// 从 description 文本中解析 `EXECTIME/ROWCOUNT/EXEC_ID` 三个数值。
@@ -242,16 +231,25 @@ impl SqllogParser {
         }
 
         match Self::parse_segment(content, line_num) {
-            Ok(Some(log)) => records.push(log),
-            Ok(None) => errors.push((
-                line_num,
-                content.to_string(),
-                SqllogError::Format {
-                    line: line_num,
-                    content: content.to_string(),
-                },
-            )),
-            Err(e) => errors.push((line_num, content.to_string(), e)),
+            Ok(Some(log)) => {
+                #[cfg(feature = "logging")]
+                tracing::debug!(line = line_num, "成功解析日志记录");
+                records.push(log);
+            }
+            Ok(None) => {
+                #[cfg(feature = "logging")]
+                tracing::warn!(line = line_num, "解析结果为空");
+                errors.push((
+                    line_num,
+                    content.to_string(),
+                    SqllogError::format_error(line_num, content.to_string()),
+                ));
+            }
+            Err(e) => {
+                #[cfg(feature = "logging")]
+                tracing::warn!(line = line_num, error = %e, "解析失败");
+                errors.push((line_num, content.to_string(), e));
+            }
         }
     }
 
