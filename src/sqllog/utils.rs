@@ -128,8 +128,19 @@ pub fn line_bytes_to_str_impl<'a>(
     errors: &mut Vec<(usize, String, SqllogError)>,
 ) -> Cow<'a, str> {
     match str::from_utf8(line_bytes) {
-        Ok(s) => Cow::Borrowed(s),
+        Ok(s) => {
+            #[cfg(feature = "logging")]
+            tracing::trace!(
+                line = line_num,
+                len = line_bytes.len(),
+                "UTF-8 字节序列有效"
+            );
+            Cow::Borrowed(s)
+        }
         Err(e) => {
+            #[cfg(feature = "logging")]
+            tracing::warn!(line = line_num, error = %e, "发现无效 UTF-8 字节序列");
+
             // 更保守的错误记录：仅记录总长度和前缀（最多 8 字节）以避免日志膨胀
             let prefix_len = 8usize.min(line_bytes.len());
             let prefix = &line_bytes[..prefix_len];
@@ -153,6 +164,12 @@ pub fn line_bytes_to_str_impl<'a>(
             // 尝试重同步到下一个首行时间戳，使用可变操作避免额外分配
             if let Some(pos) = find_first_row_pos(&s) {
                 if pos > 0 {
+                    #[cfg(feature = "logging")]
+                    tracing::trace!(
+                        line = line_num,
+                        offset = pos,
+                        "重同步到下一个首行时间戳"
+                    );
                     // 移除前缀以在原有字符串上就地重同步
                     s.drain(0..pos);
                 }

@@ -103,6 +103,14 @@ impl SyncSqllogParser {
             if chunk_size > 0
                 && (records.len() + raw_errors.len()) >= chunk_size
             {
+                #[cfg(feature = "logging")]
+                tracing::trace!(
+                    "触发分块处理: {} 条记录 + {} 个错误 >= {} (chunk_size)",
+                    records.len(),
+                    raw_errors.len(),
+                    chunk_size
+                );
+
                 // 转换错误格式并调用回调
                 let errors: Vec<ParseError> = raw_errors
                     .iter()
@@ -112,7 +120,16 @@ impl SyncSqllogParser {
                         error: error.to_string(),
                     })
                     .collect();
+
                 hook(&records, &errors);
+
+                #[cfg(feature = "logging")]
+                tracing::debug!(
+                    "完成分块处理: {} 条记录, {} 个错误",
+                    records.len(),
+                    errors.len()
+                );
+
                 records.clear();
                 raw_errors.clear();
             }
@@ -120,6 +137,12 @@ impl SyncSqllogParser {
 
         // 处理最后的内容
         if !content.is_empty() {
+            #[cfg(feature = "logging")]
+            tracing::trace!(
+                "处理文件末尾剩余内容，长度: {} 字符",
+                content.len()
+            );
+
             SqllogParser::flush_content(
                 &content,
                 line_num,
@@ -130,6 +153,13 @@ impl SyncSqllogParser {
 
         // 处理剩余的记录和错误
         if !records.is_empty() || !raw_errors.is_empty() {
+            #[cfg(feature = "logging")]
+            tracing::trace!(
+                "处理剩余数据: {} 条记录, {} 个错误",
+                records.len(),
+                raw_errors.len()
+            );
+
             // 转换错误格式并调用回调
             let errors: Vec<ParseError> = raw_errors
                 .iter()
@@ -139,14 +169,22 @@ impl SyncSqllogParser {
                     error: error.to_string(),
                 })
                 .collect();
+
             hook(&records, &errors);
+
+            #[cfg(feature = "logging")]
+            tracing::debug!(
+                "完成最终批次处理: {} 条记录, {} 个错误",
+                records.len(),
+                errors.len()
+            );
         }
 
         #[cfg(feature = "logging")]
-        tracing::debug!(
-            "流式解析文件完成，共处理 {} 条记录，{} 个错误",
-            records.len(),
-            raw_errors.len()
+        tracing::info!(
+            "流式解析文件完成: {}, 总处理行数: {}",
+            path_ref.display(),
+            line_num
         );
         Ok(())
     }

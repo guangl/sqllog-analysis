@@ -23,7 +23,28 @@ use crate::exporter::{ExportStats, SyncExporter};
     feature = "exporter-sqlite",
     feature = "exporter-duckdb"
 ))]
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// 并发处理总结结果
+#[cfg(any(
+    feature = "exporter-csv",
+    feature = "exporter-json",
+    feature = "exporter-sqlite",
+    feature = "exporter-duckdb"
+))]
+#[derive(Debug, Clone)]
+pub struct ProcessingSummary {
+    /// 总处理时间
+    pub total_duration: Duration,
+    /// 解析耗时
+    pub parse_duration: Duration,
+    /// 导出耗时
+    pub export_duration: Duration,
+    /// 解析错误
+    pub parse_errors: Vec<ParseError>,
+    /// 导出统计信息
+    pub export_stats: Vec<(String, ExportStats)>,
+}
 
 /// 解析任务
 #[derive(Debug, Clone)]
@@ -76,7 +97,7 @@ impl ConcurrentParser {
     /// - `exporters`: 导出器列表（每个导出器将在独立线程中运行）
     ///
     /// # 返回
-    /// 返回 (所有解析错误, 所有导出器统计信息)
+    /// 返回处理总结，包含时间信息、解析错误和导出统计
     #[cfg(any(
         feature = "exporter-csv",
         feature = "exporter-json",
@@ -87,9 +108,15 @@ impl ConcurrentParser {
         &self,
         file_paths: &[PathBuf],
         exporters: Vec<Box<dyn SyncExporter + Send>>,
-    ) -> Result<(Vec<ParseError>, Vec<(String, ExportStats)>)> {
+    ) -> Result<ProcessingSummary> {
         if file_paths.is_empty() {
-            return Ok((Vec::new(), Vec::new()));
+            return Ok(ProcessingSummary {
+                total_duration: Duration::from_nanos(0),
+                parse_duration: Duration::from_nanos(0),
+                export_duration: Duration::from_nanos(0),
+                parse_errors: Vec::new(),
+                export_stats: Vec::new(),
+            });
         }
 
         if exporters.is_empty() {
@@ -233,6 +260,9 @@ impl ConcurrentParser {
             }
         }
 
+        // 记录解析完成时间
+        let parse_end_time = std::time::Instant::now();
+
         // 收集所有解析错误
         drop(error_tx);
         let mut all_errors = Vec::new();
@@ -272,15 +302,26 @@ impl ConcurrentParser {
         };
 
         let elapsed = start_time.elapsed();
+        let parse_duration = parse_end_time.duration_since(start_time);
+        let export_duration = elapsed - parse_duration;
+
         #[cfg(feature = "logging")]
         tracing::info!(
-            "并发解析和导出完成，耗时: {:?}, 解析错误: {} 个, 导出器: {} 个",
+            "并发解析和导出完成，总耗时: {:?}, 解析耗时: {:?}, 导出耗时: {:?}, 解析错误: {} 个, 导出器: {} 个",
             elapsed,
+            parse_duration,
+            export_duration,
             all_errors.len(),
             final_stats.len()
         );
 
-        Ok((all_errors, final_stats))
+        Ok(ProcessingSummary {
+            total_duration: elapsed,
+            parse_duration,
+            export_duration,
+            parse_errors: all_errors,
+            export_stats: final_stats,
+        })
     }
 
     /// 解析工作线程
@@ -331,6 +372,9 @@ impl ConcurrentParser {
                 thread_id,
                 task.file_path.display()
             );
+
+            // 记录单个解析任务开始时间
+            let task_start_time = std::time::Instant::now();
 
             let mut file_errors = Vec::new();
             let mut export_task_id = 0;
@@ -424,6 +468,17 @@ impl ConcurrentParser {
                 }
             }
 
+            // 计算单个解析任务耗时
+            let task_elapsed = task_start_time.elapsed();
+            #[cfg(feature = "logging")]
+            tracing::info!(
+                "解析线程 {} 完成任务: {}, 记录数: {}, 耗时: {:?}",
+                thread_id,
+                task.file_path.display(),
+                total_records,
+                task_elapsed
+            );
+
             task_counter += 1;
         }
 
@@ -495,37 +550,33 @@ impl ConcurrentParser {
                 task.records.len()
             );
 
-            let start_time = std::time::Instant::now();
+            // 记录单个导出任务开始时间
+            let task_start_time = std::time::Instant::now();
+
             match exporter.export_batch(&task.records) {
                 Ok(_) => {
                     exported_count += task.records.len();
-                    let elapsed = start_time.elapsed();
+                    let task_elapsed = task_start_time.elapsed();
                     #[cfg(feature = "logging")]
-                    tracing::trace!(
-                        "导出线程 {} 成功导出 {} 条记录，耗时: {:?}",
+                    tracing::info!(
+                        "导出线程 {} 成功完成任务 {}: {} 条记录, 耗时: {:?}",
                         exporter_id,
+                        task.task_id,
                         task.records.len(),
-                        elapsed
+                        task_elapsed
                     );
-
-                    if elapsed.as_millis() > 100 {
-                        #[cfg(feature = "logging")]
-                        tracing::debug!(
-                            "导出线程 {} 批次导出较慢: {} 条记录耗时 {:?}",
-                            exporter_id,
-                            task.records.len(),
-                            elapsed
-                        );
-                    }
                 }
                 Err(e) => {
                     failed_count += task.records.len();
+                    let task_elapsed = task_start_time.elapsed();
                     #[cfg(feature = "logging")]
                     tracing::error!(
-                        "导出线程 {} 导出失败: {}, 影响 {} 条记录",
+                        "导出线程 {} 任务 {} 导出失败: {}, 影响 {} 条记录, 耗时: {:?}",
                         exporter_id,
+                        task.task_id,
                         e,
-                        task.records.len()
+                        task.records.len(),
+                        task_elapsed
                     );
                 }
             }
@@ -541,18 +592,12 @@ impl ConcurrentParser {
         );
 
         // 完成导出器
-        let finalize_start = std::time::Instant::now();
         if let Err(e) = exporter.finalize() {
             #[cfg(feature = "logging")]
             tracing::error!("导出线程 {} 完成时出错: {}", exporter_id, e);
         } else {
-            let finalize_elapsed = finalize_start.elapsed();
             #[cfg(feature = "logging")]
-            tracing::debug!(
-                "导出线程 {} finalize完成，耗时: {:?}",
-                exporter_id,
-                finalize_elapsed
-            );
+            tracing::debug!("导出线程 {} finalize完成", exporter_id);
         }
 
         let mut stats = exporter.get_stats();
@@ -562,18 +607,12 @@ impl ConcurrentParser {
 
         #[cfg(feature = "logging")]
         tracing::info!(
-            "导出工作线程 {} 退出，导出器: {}，处理任务: {}, 成功: {} 条，失败: {} 条，总耗时: {:?}",
+            "导出工作线程 {} 退出，导出器: {}，处理任务: {}, 成功: {} 条，失败: {} 条",
             exporter_id,
             exporter.name(),
             task_count,
             exported_count,
-            failed_count,
-            stats
-                .end_time
-                .map(|end| end.duration_since(
-                    stats.start_time.unwrap_or_else(std::time::Instant::now)
-                ))
-                .unwrap_or_else(|| std::time::Duration::from_secs(0))
+            failed_count
         );
 
         Ok(stats)
@@ -753,7 +792,6 @@ impl ConcurrentParser {
         let mut all_errors = Vec::new();
         let mut batch_counter = 0;
 
-        let parse_start = std::time::Instant::now();
         let parse_result = crate::sqllog::SyncSqllogParser::parse_with_hooks(
             &file_path,
             batch_size,
@@ -773,19 +811,16 @@ impl ConcurrentParser {
             },
         );
 
-        let parse_elapsed = parse_start.elapsed();
-
         match parse_result {
             Ok(_) => {
                 #[cfg(feature = "logging")]
                 tracing::debug!(
-                    "线程 {} 成功解析文件: {}，总记录: {}, 总错误: {}, 批次: {}, 耗时: {:?}",
+                    "线程 {} 成功解析文件: {}，总记录: {}, 总错误: {}, 批次: {}",
                     thread_id,
                     file_path.display(),
                     all_records.len(),
                     all_errors.len(),
-                    batch_counter,
-                    parse_elapsed
+                    batch_counter
                 );
 
                 let batch = ParseBatch {
@@ -803,11 +838,10 @@ impl ConcurrentParser {
             Err(e) => {
                 #[cfg(feature = "logging")]
                 tracing::error!(
-                    "线程 {} 解析文件失败: {}, 错误: {}, 耗时: {:?}",
+                    "线程 {} 解析文件失败: {}, 错误: {}",
                     thread_id,
                     file_path.display(),
-                    e,
-                    parse_elapsed
+                    e
                 );
             }
         }
@@ -862,7 +896,9 @@ impl ConcurrentParser {
                 task.file_path.display()
             );
 
-            let parse_start = std::time::Instant::now();
+            // 记录共享解析任务开始时间
+            let task_start_time = std::time::Instant::now();
+
             let parse_result =
                 crate::sqllog::SyncSqllogParser::parse_with_hooks(
                     &task.file_path,
@@ -883,19 +919,18 @@ impl ConcurrentParser {
                     },
                 );
 
-            let parse_elapsed = parse_start.elapsed();
-
             match parse_result {
                 Ok(_) => {
+                    let task_elapsed = task_start_time.elapsed();
                     #[cfg(feature = "logging")]
-                    tracing::debug!(
+                    tracing::info!(
                         "线程 {} 成功解析共享任务文件: {}，总记录: {}, 总错误: {}, 批次: {}, 耗时: {:?}",
                         thread_id,
                         task.file_path.display(),
                         all_records.len(),
                         all_errors.len(),
                         batch_counter,
-                        parse_elapsed
+                        task_elapsed
                     );
 
                     let batch = ParseBatch {
@@ -915,13 +950,14 @@ impl ConcurrentParser {
                     }
                 }
                 Err(e) => {
+                    let task_elapsed = task_start_time.elapsed();
                     #[cfg(feature = "logging")]
                     tracing::error!(
                         "线程 {} 解析共享任务文件失败: {}, 错误: {}, 耗时: {:?}",
                         thread_id,
                         task.file_path.display(),
                         e,
-                        parse_elapsed
+                        task_elapsed
                     );
                 }
             }

@@ -236,7 +236,7 @@ impl SqllogParser {
         match Self::parse_segment(content, line_num) {
             Ok(Some(log)) => {
                 #[cfg(feature = "logging")]
-                tracing::debug!(line = line_num, "成功解析日志记录");
+                tracing::trace!(line = line_num, "成功解析日志记录");
                 records.push(log);
             }
             Ok(None) => {

@@ -16,6 +16,7 @@ fn main() -> Result<()> {
                 env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
             )
             .init();
+        tracing::info!("SQL日志分析工具启动");
     }
 
     let args: Vec<String> = env::args().collect();
@@ -25,8 +26,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    #[cfg(feature = "logging")]
+    tracing::debug!("命令行参数: {:?}", args);
+
     match args[1].as_str() {
         "parse" => {
+            #[cfg(feature = "logging")]
+            tracing::info!("执行解析命令");
+
             let files = get_file_args(&args[2..]);
             if files.is_empty() {
                 eprintln!("错误: 至少需要指定一个日志文件");
@@ -35,6 +42,9 @@ fn main() -> Result<()> {
             run_parse_only(&files)
         }
         "export" => {
+            #[cfg(feature = "logging")]
+            tracing::info!("执行导出命令");
+
             let options = parse_export_args(&args[2..]);
             if options.files.is_empty() {
                 eprintln!("错误: 至少需要指定一个日志文件");
@@ -164,6 +174,9 @@ fn run_parse_only(files: &[PathBuf]) -> Result<()> {
     println!("=== 解析模式 ===");
     println!("文件数量: {}", files.len());
 
+    #[cfg(feature = "logging")]
+    tracing::info!("开始解析 {} 个文件", files.len());
+
     // 使用新的默认配置：batch_size = 0, thread_count = Some(0)
     let config = SqllogConfig::default();
 
@@ -211,6 +224,14 @@ fn run_parse_only(files: &[PathBuf]) -> Result<()> {
 fn run_concurrent_export(options: &ExportOptions) -> Result<()> {
     println!("=== 并发导出模式 ===");
     println!("文件数量: {}", options.files.len());
+
+    #[cfg(feature = "logging")]
+    tracing::info!(
+        "开始并发导出: {} 个文件, 格式: {:?}, 输出: {:?}",
+        options.files.len(),
+        options.format,
+        options.output
+    );
 
     // 使用新的默认配置：batch_size = 0, thread_count = Some(0)
     let mut config = SqllogConfig::default();
@@ -309,17 +330,17 @@ fn run_concurrent_export(options: &ExportOptions) -> Result<()> {
 
     println!("导出器数量: {}", exporters.len());
 
-    let start = std::time::Instant::now();
-    let (errors, stats) =
+    let summary =
         parser.parse_and_export_concurrent(&options.files, exporters)?;
-    let elapsed = start.elapsed();
 
-    println!("\n=== 导出结果 ===");
-    println!("处理时间: {:?}", elapsed);
-    println!("解析错误: {} 个", errors.len());
+    println!("\n=== 处理总结 ===");
+    println!("总处理时间: {:?}", summary.total_duration);
+    println!("解析耗时: {:?}", summary.parse_duration);
+    println!("导出耗时: {:?}", summary.export_duration);
+    println!("解析错误: {} 个", summary.parse_errors.len());
 
     let mut total_exported = 0;
-    for (name, stat) in stats {
+    for (name, stat) in &summary.export_stats {
         println!("\n{}: ", name);
         println!("  导出记录: {} 条", stat.exported_records);
         println!("  失败记录: {} 条", stat.failed_records);
@@ -329,9 +350,19 @@ fn run_concurrent_export(options: &ExportOptions) -> Result<()> {
     println!("\n总导出记录: {} 条", total_exported);
     if total_exported > 0 {
         println!(
-            "导出速度: {:.2} 记录/秒",
-            total_exported as f64 / elapsed.as_secs_f64()
+            "总处理速度: {:.2} 记录/秒",
+            total_exported as f64 / summary.total_duration.as_secs_f64()
         );
+        println!(
+            "解析速度: {:.2} 记录/秒",
+            total_exported as f64 / summary.parse_duration.as_secs_f64()
+        );
+        if summary.export_duration.as_secs_f64() > 0.0 {
+            println!(
+                "导出速度: {:.2} 记录/秒",
+                total_exported as f64 / summary.export_duration.as_secs_f64()
+            );
+        }
     }
 
     Ok(())

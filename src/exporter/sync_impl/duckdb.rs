@@ -17,7 +17,13 @@ pub struct SyncDuckdbExporter {
 impl SyncDuckdbExporter {
     /// 创建新的同步 DuckDB 导出器
     pub fn new(db_path: &Path) -> Result<Self, SqllogError> {
+        #[cfg(feature = "logging")]
+        tracing::info!("创建DuckDB导出器: {}", db_path.display());
+
         let conn = Connection::open(db_path)?;
+
+        #[cfg(feature = "logging")]
+        tracing::debug!("DuckDB连接已建立，开始创建表结构");
 
         // 仅创建表，索引将在 finalize 时创建以提高插入性能
         conn.execute(
@@ -42,6 +48,9 @@ impl SyncDuckdbExporter {
             [],
         )?;
 
+        #[cfg(feature = "logging")]
+        tracing::debug!("DuckDB表结构创建完成");
+
         Ok(Self {
             connection: std::sync::Mutex::new(conn),
             stats: ExportStats::new(),
@@ -57,6 +66,12 @@ impl SyncDuckdbExporter {
         if records.is_empty() {
             return Ok(());
         }
+
+        #[cfg(feature = "logging")]
+        tracing::trace!(
+            "开始插入 {} 条DuckDB记录 (使用append_rows)",
+            records.len()
+        );
 
         let conn = self.connection.lock().unwrap();
 
@@ -89,6 +104,9 @@ impl SyncDuckdbExporter {
         // 批量插入所有行
         appender.append_rows(batch_data.iter())?;
         appender.flush()?;
+
+        #[cfg(feature = "logging")]
+        tracing::trace!("DuckDB批次插入完成: {} 条记录", records.len());
 
         // 显式释放appender
         drop(appender);

@@ -62,26 +62,71 @@ impl Default for SqllogConfig {
 impl Config {
     /// 从 TOML 文件加载配置
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = std::fs::read_to_string(path).map_err(|e| {
+        let path_ref = path.as_ref();
+        #[cfg(feature = "logging")]
+        tracing::info!("开始加载配置文件: {}", path_ref.display());
+
+        let content = std::fs::read_to_string(path_ref).map_err(|e| {
+            #[cfg(feature = "logging")]
+            tracing::error!(
+                "读取配置文件失败: {}, 错误: {}",
+                path_ref.display(),
+                e
+            );
             SqllogError::other(format!("读取配置文件失败: {}", e))
         })?;
 
+        #[cfg(feature = "logging")]
+        tracing::trace!("配置文件内容长度: {} 字节", content.len());
+
         let config: Config = toml::from_str(&content).map_err(|e| {
+            #[cfg(feature = "logging")]
+            tracing::error!(
+                "解析配置文件失败: {}, 错误: {}",
+                path_ref.display(),
+                e
+            );
             SqllogError::other(format!("解析配置文件失败: {}", e))
         })?;
+
+        #[cfg(feature = "logging")]
+        tracing::info!(
+            "成功加载配置文件: {}, 日志级别: {}, 线程数: {:?}",
+            path_ref.display(),
+            config.log.level,
+            config.sqllog.thread_count
+        );
 
         Ok(config)
     }
 
     /// 保存配置到 TOML 文件
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let path_ref = path.as_ref();
+        #[cfg(feature = "logging")]
+        tracing::info!("开始保存配置到文件: {}", path_ref.display());
+
         let content = toml::to_string_pretty(self).map_err(|e| {
+            #[cfg(feature = "logging")]
+            tracing::error!("序列化配置失败: {}", e);
             SqllogError::other(format!("序列化配置失败: {}", e))
         })?;
 
-        std::fs::write(path, content).map_err(|e| {
+        #[cfg(feature = "logging")]
+        tracing::trace!("序列化后的配置长度: {} 字节", content.len());
+
+        std::fs::write(path_ref, content).map_err(|e| {
+            #[cfg(feature = "logging")]
+            tracing::error!(
+                "写入配置文件失败: {}, 错误: {}",
+                path_ref.display(),
+                e
+            );
             SqllogError::other(format!("写入配置文件失败: {}", e))
         })?;
+
+        #[cfg(feature = "logging")]
+        tracing::info!("成功保存配置到文件: {}", path_ref.display());
 
         Ok(())
     }

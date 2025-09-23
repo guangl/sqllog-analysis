@@ -22,7 +22,13 @@ impl SyncSqliteExporter {
 
     /// 内部方法：创建导出器
     fn create_exporter(db_path: &Path) -> Result<Self, SqllogError> {
+        #[cfg(feature = "logging")]
+        tracing::info!("创建SQLite导出器: {}", db_path.display());
+
         let conn = Connection::open(db_path).map_err(SqllogError::Sqlite)?;
+
+        #[cfg(feature = "logging")]
+        tracing::debug!("SQLite连接已建立，开始创建表结构");
 
         // 仅创建表，索引将在 finalize 时创建以提高插入性能
         conn.execute(
@@ -48,6 +54,9 @@ impl SyncSqliteExporter {
         )
         .map_err(SqllogError::Sqlite)?;
 
+        #[cfg(feature = "logging")]
+        tracing::debug!("SQLite表结构创建完成");
+
         Ok(Self {
             connection: std::sync::Mutex::new(conn),
             stats: ExportStats::new(),
@@ -63,6 +72,9 @@ impl SyncSqliteExporter {
         if records.is_empty() {
             return Ok(());
         }
+
+        #[cfg(feature = "logging")]
+        tracing::trace!("开始插入 {} 条SQLite记录", records.len());
 
         let mut conn = self.connection.lock().unwrap();
         let tx = conn.transaction().map_err(SqllogError::Sqlite)?;
@@ -102,6 +114,13 @@ impl SyncSqliteExporter {
         }
 
         tx.commit().map_err(SqllogError::Sqlite)?;
+
+        #[cfg(feature = "logging")]
+        tracing::trace!(
+            "SQLite批次插入完成: 成功 {} 条, 失败 {} 条",
+            successful,
+            failed
+        );
 
         self.stats.exported_records += successful;
         self.stats.failed_records += failed;

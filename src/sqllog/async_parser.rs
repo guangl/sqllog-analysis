@@ -80,7 +80,9 @@ impl AsyncSqllogParser {
     where
         P: AsRef<Path>,
     {
-        let file = File::open(path).await?;
+        let path_ref = path.as_ref();
+
+        let file = File::open(path_ref).await?;
         let reader = BufReader::new(file);
         let mut lines = reader.lines();
 
@@ -106,17 +108,30 @@ impl AsyncSqllogParser {
 
             // 发送记录数据块
             if records.len() >= chunk_size {
+                #[cfg(feature = "logging")]
+                tracing::trace!("发送记录数据块: {} 条记录", records.len());
+
                 if let Err(_) = record_tx.send(records.clone()) {
                     #[cfg(feature = "logging")]
                     tracing::warn!("记录接收器已关闭，停止发送记录");
                     return Ok(());
                 }
+
+                #[cfg(feature = "logging")]
+                tracing::debug!(
+                    "记录数据块发送完成: {} 条记录",
+                    records.len()
+                );
+
                 records.clear();
                 should_yield = true;
             }
 
             // 发送错误数据块
             if raw_errors.len() >= chunk_size {
+                #[cfg(feature = "logging")]
+                tracing::trace!("发送错误数据块: {} 个错误", raw_errors.len());
+
                 let errors: Vec<ParseError> = raw_errors
                     .iter()
                     .map(|(line, content, error)| ParseError {
@@ -126,11 +141,18 @@ impl AsyncSqllogParser {
                     })
                     .collect();
 
-                if let Err(_) = error_tx.send(errors) {
+                if let Err(_) = error_tx.send(errors.clone()) {
                     #[cfg(feature = "logging")]
                     tracing::warn!("错误接收器已关闭，停止发送错误");
                     return Ok(());
                 }
+
+                #[cfg(feature = "logging")]
+                tracing::debug!(
+                    "错误数据块发送完成: {} 个错误",
+                    errors.len()
+                );
+
                 raw_errors.clear();
                 should_yield = true;
             }
@@ -153,7 +175,15 @@ impl AsyncSqllogParser {
 
         // 发送剩余的记录和错误
         if !records.is_empty() {
+            let record_count = records.len();
+
             let _ = record_tx.send(records);
+
+            #[cfg(feature = "logging")]
+            tracing::debug!(
+                "发送最终记录批次: {} 条记录",
+                record_count
+            );
         }
 
         if !raw_errors.is_empty() {
@@ -165,9 +195,22 @@ impl AsyncSqllogParser {
                     error: error.to_string(),
                 })
                 .collect();
+            let error_count = errors.len();
 
             let _ = error_tx.send(errors);
+
+            #[cfg(feature = "logging")]
+            tracing::debug!(
+                "发送最终错误批次: {} 个错误",
+                error_count
+            );
         }
+
+        #[cfg(feature = "logging")]
+        tracing::info!(
+            "异步解析文件完成: {}",
+            path_ref.display()
+        );
 
         Ok(())
     }
