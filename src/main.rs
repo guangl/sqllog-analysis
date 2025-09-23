@@ -5,6 +5,8 @@ use sqllog_analysis::config::SqllogConfig;
 use sqllog_analysis::prelude::*;
 use std::path::PathBuf;
 
+use sqllog_analysis::exporter::SyncExporter;
+
 /// SQL 日志分析工具
 #[derive(Parser)]
 #[command(name = "sqllog-cli")]

@@ -8,9 +8,6 @@ pub mod sync_parser;
 pub mod types;
 pub mod utils;
 
-#[cfg(feature = "async")]
-pub mod async_parser;
-
 // 重新导出核心类型和函数
 pub use concurrent::{ConcurrentParser, ParseBatch, ParseTask};
 pub use parser::SqllogParser;
@@ -25,6 +22,3 @@ pub use utils::{find_first_row_pos, is_first_row, line_bytes_to_str_impl};
     feature = "exporter-duckdb"
 ))]
 pub use concurrent::{ExportTask, ProcessingSummary};
-
-#[cfg(feature = "async")]
-pub use async_parser::AsyncSqllogParser;
