@@ -40,11 +40,16 @@ impl ParseResult {
     }
 }
 
-/// SQL 日志文件解析器
-pub struct SqllogFileParser;
+/// 同步 SQL 日志文件解析器
+pub struct SyncSqllogParser;
 
-impl SqllogFileParser {
-    /// 使用回调函数解析文件
+impl SyncSqllogParser {
+    /// 流式解析文件，使用回调函数处理分块数据
+    ///
+    /// # 参数
+    /// - `path`: 要解析的日志文件路径
+    /// - `chunk_size`: 每次回调处理的记录数量
+    /// - `hook`: 回调函数，接收解析的记录和错误
     pub fn parse_with_hooks<P, F>(
         path: P,
         chunk_size: usize,
@@ -57,7 +62,7 @@ impl SqllogFileParser {
         let path_ref = path.as_ref();
         #[cfg(feature = "logging")]
         tracing::debug!(
-            "开始解析文件: {}, chunk_size = {}",
+            "开始流式解析文件: {}, chunk_size = {}",
             path_ref.display(),
             chunk_size
         );
@@ -139,7 +144,7 @@ impl SqllogFileParser {
 
         #[cfg(feature = "logging")]
         tracing::debug!(
-            "文件解析完成，共处理 {} 条记录，{} 个错误",
+            "流式解析文件完成，共处理 {} 条记录，{} 个错误",
             records.len(),
             raw_errors.len()
         );

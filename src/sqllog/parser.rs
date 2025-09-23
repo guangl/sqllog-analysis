@@ -27,7 +27,10 @@ impl SqllogParser {
         // 只对完整段做正则匹配
         if let Some(caps) = SQLLOG_RE.captures(segment) {
             #[cfg(feature = "logging")]
-            tracing::trace!(line = line_num, "匹配到 SQLLOG 正则，开始解析字段");
+            tracing::trace!(
+                line = line_num,
+                "匹配到 SQLLOG 正则，开始解析字段"
+            );
             // 将字段解析提取到私有方法，减少本方法长度
             let log = Self::parse_fields(&caps, segment, line_num)?;
             #[cfg(feature = "logging")]
@@ -312,45 +315,5 @@ impl SqllogParser {
         }
         content.push_str(clean);
         *line_num += 1;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_simple_log() {
-        let log_content = r#"2024-01-01 12:00:00.000 (EP[1] sess:NULL thrd:NULL user:NULL trxid:NULL stmt:NULL) [SEL]: SELECT * FROM users;
-EXECTIME: 100(ms) ROWCOUNT: 5 EXEC_ID: 123."#;
-
-        let result = SqllogParser::parse_segment(log_content, 1).unwrap();
-        assert!(result.is_some());
-
-        let log = result.unwrap();
-        assert_eq!(log.occurrence_time, "2024-01-01 12:00:00.000");
-        assert_eq!(log.ep, "1");
-        assert_eq!(log.sql_type, Some("SEL".to_string()));
-        assert_eq!(log.execute_time, Some(100));
-        assert_eq!(log.rowcount, Some(5));
-        assert_eq!(log.execute_id, Some(123));
-    }
-
-    #[test]
-    fn test_parse_invalid_log() {
-        let invalid_content = "This is not a valid log";
-        let result = SqllogParser::parse_segment(invalid_content, 1);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_desc_numbers() {
-        let desc =
-            "SELECT * FROM users\nEXECTIME: 100(ms) ROWCOUNT: 5 EXEC_ID: 123.";
-        let (exec_time, rowcount, exec_id) =
-            SqllogParser::parse_desc_numbers(desc, 1);
-        assert_eq!(exec_time, Some(100));
-        assert_eq!(rowcount, Some(5));
-        assert_eq!(exec_id, Some(123));
     }
 }

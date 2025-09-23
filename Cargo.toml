@@ -35,8 +35,13 @@ tracing-appender = { version = "0.2", optional = true }
 
 # 异步运行时支持
 tokio = { version = "1.0", features = ["full"], optional = true }
+futures = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tempfile = "3.0"
 
 [features]
 default = ["logging"]
 logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
 tokio = ["dep:tokio"]
+async = ["dep:tokio", "dep:futures", "logging"]

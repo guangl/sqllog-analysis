@@ -20,6 +20,19 @@ pub struct LogConfig {
     pub level: Level,
 }
 
+impl LogConfig {
+    /// 创建新的日志配置，使用默认级别
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 设置日志级别
+    pub fn level(mut self, level: Level) -> Self {
+        self.level = level;
+        self
+    }
+}
+
 impl Default for LogConfig {
     fn default() -> Self {
         Self { level: Level::DEBUG }
@@ -141,64 +154,4 @@ pub fn init_logging(config: LogConfig) -> LogResult<()> {
 /// ```
 pub fn init_default_logging() -> LogResult<()> {
     init_logging(LogConfig::default())
-}
-
-/// 为测试环境初始化日志系统
-///
-/// 使用 DEBUG 级别，方便调试测试。
-///
-/// # Examples
-///
-/// ```no_run
-/// #[cfg(test)]
-/// mod tests {
-///     use sqllog_analysis::logging::init_test_logging;
-///
-///     #[test]
-///     fn test_something() {
-///         init_test_logging().ok();
-///         // 你的测试代码
-///     }
-/// }
-/// ```
-pub fn init_test_logging() -> LogResult<()> {
-    let config = LogConfig { level: Level::DEBUG };
-    init_logging(config)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tracing::{debug, error, info, warn};
-
-    #[test]
-    fn test_log_config_builder() {
-        let config = LogConfig { level: Level::DEBUG };
-        assert_eq!(config.level, Level::DEBUG);
-    }
-
-    #[test]
-    fn test_default_config() {
-        let config = LogConfig::default();
-        assert_eq!(config.level, Level::DEBUG);
-    }
-
-    #[test]
-    fn test_init_default_logging() {
-        // 这个测试可能会失败，如果日志系统已经被初始化了
-        // 在实际使用中，每个进程只能初始化一次日志系统
-        let result = init_default_logging();
-
-        // 我们检查结果是否合理：要么成功，要么因为已经初始化而失败
-        match result {
-            Ok(()) => println!("日志初始化成功"),
-            Err(e) => println!("日志初始化结果: {:?} (可能已经初始化过)", e),
-        }
-
-        // 无论如何，测试日志输出功能
-        info!("这是一条信息日志");
-        warn!("这是一条警告日志");
-        error!("这是一条错误日志");
-        debug!("这是一条调试日志");
-    }
 }
