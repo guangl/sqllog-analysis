@@ -1,9 +1,9 @@
 //! DuckDB 异步数据库导出器
 
+use super::AsyncExporter;
 use crate::error::SqllogError;
 use crate::exporter::ExportStats;
 use crate::sqllog::types::Sqllog;
-use super::AsyncExporter;
 use async_trait::async_trait;
 use duckdb::Connection;
 use std::path::{Path, PathBuf};
@@ -14,28 +14,15 @@ use tokio::sync::Mutex;
 pub struct AsyncDuckdbExporter {
     connection: Arc<Mutex<Connection>>,
     stats: ExportStats,
-    is_temp_db: bool,
     db_path: PathBuf,
 }
 
 impl AsyncDuckdbExporter {
-    /// 创建新的 DuckDB 导出器 (单线程模式，直接写入主数据库)
+    /// 创建新的 DuckDB 导出器
     pub async fn new(db_path: &Path) -> Result<Self, SqllogError> {
-        Self::create_exporter(db_path, false).await
-    }
-
-    /// 创建临时数据库导出器 (多线程模式，写入临时数据库)
-    pub async fn new_temp(temp_db_path: &Path) -> Result<Self, SqllogError> {
-        Self::create_exporter(temp_db_path, true).await
-    }
-
-    /// 内部方法：创建导出器
-    async fn create_exporter(
-        db_path: &Path,
-        is_temp: bool,
-    ) -> Result<Self, SqllogError> {
-        let conn = Connection::open(db_path)
-            .map_err(|e| SqllogError::other(format!("DuckDB connection error: {}", e)))?;
+        let conn = Connection::open(db_path).map_err(|e| {
+            SqllogError::other(format!("DuckDB connection error: {}", e))
+        })?;
 
         let connection = Arc::new(Mutex::new(conn));
 
@@ -65,101 +52,20 @@ impl AsyncDuckdbExporter {
             "#,
                 [],
             )
-            .map_err(|e| SqllogError::other(format!("DuckDB table creation error: {}", e)))?;
+            .map_err(|e| {
+                SqllogError::other(format!(
+                    "DuckDB table creation error: {}",
+                    e
+                ))
+            })?;
 
         drop(conn_lock);
 
         Ok(Self {
             connection,
             stats: ExportStats::new(),
-            is_temp_db: is_temp,
             db_path: db_path.to_path_buf(),
         })
-    }
-
-    /// 合并多个临时数据库到主数据库
-    pub async fn merge_temp_databases(
-        main_db_path: &Path,
-        temp_db_paths: &[PathBuf],
-    ) -> Result<(), SqllogError> {
-        let mut main_conn = Connection::open(main_db_path)
-            .map_err(|e| SqllogError::other(format!("DuckDB main connection error: {}", e)))?;
-
-        // 创建主表
-        main_conn
-            .execute(
-                r#"
-            CREATE TABLE IF NOT EXISTS sqllogs (
-                occurrence_time VARCHAR NOT NULL,
-                ep VARCHAR,
-                session VARCHAR,
-                thread VARCHAR,
-                user VARCHAR,
-                trx_id VARCHAR,
-                statement TEXT,
-                appname VARCHAR,
-                ip VARCHAR,
-                sql_type VARCHAR,
-                description TEXT NOT NULL,
-                execute_time INTEGER,
-                rowcount INTEGER,
-                execute_id INTEGER
-            )
-            "#,
-                [],
-            )
-            .map_err(|e| SqllogError::other(format!("DuckDB main table creation error: {}", e)))?;
-
-        // 合并每个临时数据库
-        for temp_db_path in temp_db_paths {
-            if !temp_db_path.exists() {
-                #[cfg(feature = "logging")]
-                tracing::warn!("临时数据库文件不存在: {}", temp_db_path.display());
-                continue;
-            }
-
-            // 附加临时数据库并复制数据
-            let attach_sql = format!(
-                "ATTACH DATABASE '{}' AS temp_db",
-                temp_db_path.display()
-            );
-
-            main_conn
-                .execute(&attach_sql, [])
-                .map_err(|e| SqllogError::other(format!("DuckDB attach database error: {}", e)))?;
-
-            // 复制数据
-            main_conn
-                .execute(
-                    "INSERT INTO sqllogs SELECT * FROM temp_db.sqllogs",
-                    [],
-                )
-                .map_err(|e| SqllogError::other(format!("DuckDB data copy error: {}", e)))?;
-
-            // 分离临时数据库
-            main_conn
-                .execute("DETACH DATABASE temp_db", [])
-                .map_err(|e| SqllogError::other(format!("DuckDB detach database error: {}", e)))?;
-
-            #[cfg(feature = "logging")]
-            tracing::info!("已合并临时数据库: {}", temp_db_path.display());
-        }
-
-        // 创建索引以提高查询性能
-        Self::create_indexes(&mut main_conn).await?;
-
-        #[cfg(feature = "logging")]
-        tracing::info!("DuckDB 数据库合并完成: {}", main_db_path.display());
-
-        // 删除临时文件
-        for temp_db_path in temp_db_paths {
-            if temp_db_path.exists() {
-                let _ = std::fs::remove_file(temp_db_path);
-                #[cfg(feature = "logging")]
-                tracing::debug!("已删除临时数据库: {}", temp_db_path.display());
-            }
-        }
-        Ok(())
     }
 
     /// 插入记录到数据库
@@ -241,8 +147,12 @@ impl AsyncDuckdbExporter {
         ];
 
         for index_sql in indexes {
-            conn.execute(index_sql, [])
-                .map_err(|e| SqllogError::other(format!("DuckDB index creation error: {}", e)))?;
+            conn.execute(index_sql, []).map_err(|e| {
+                SqllogError::other(format!(
+                    "DuckDB index creation error: {}",
+                    e
+                ))
+            })?;
         }
 
         #[cfg(feature = "logging")]
@@ -258,25 +168,31 @@ impl AsyncExporter for AsyncDuckdbExporter {
         "AsyncDuckdbExporter"
     }
 
-    async fn export_record(&mut self, record: &Sqllog) -> Result<(), crate::error::SqllogError> {
+    async fn export_record(
+        &mut self,
+        record: &Sqllog,
+    ) -> Result<(), crate::error::SqllogError> {
         self.insert_records(&[record.clone()]).await
     }
 
-    async fn export_batch(&mut self, records: &[Sqllog]) -> Result<(), crate::error::SqllogError> {
+    async fn export_batch(
+        &mut self,
+        records: &[Sqllog],
+    ) -> Result<(), crate::error::SqllogError> {
         self.insert_records(records).await
     }
 
     async fn finalize(&mut self) -> Result<(), crate::error::SqllogError> {
-        if !self.is_temp_db {
-            let connection = Arc::clone(&self.connection);
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Handle::current();
-                let mut conn = rt.block_on(connection.lock());
-                let _ = Self::create_indexes(&mut conn);
-            })
-            .await
-            .map_err(|e| SqllogError::other(format!("Finalize spawn blocking error: {}", e)))?;
-        }
+        let connection = Arc::clone(&self.connection);
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            let mut conn = rt.block_on(connection.lock());
+            let _ = Self::create_indexes(&mut conn);
+        })
+        .await
+        .map_err(|e| {
+            SqllogError::other(format!("Finalize spawn blocking error: {}", e))
+        })?;
         Ok(())
     }
 
