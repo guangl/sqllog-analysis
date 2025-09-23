@@ -25,6 +25,7 @@ thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 toml = "0.8"
+clap = { version = "4.0", features = ["derive"] }
 
 # 日志依赖（可选）
 tracing = { version = "0.1", optional = true }

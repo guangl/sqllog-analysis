@@ -1,9 +1,9 @@
 //! CSV 导出器实现 (同步版本)
 
+use super::SyncExporter;
 use crate::error::Result;
 use crate::exporter::ExportStats;
 use crate::sqllog::types::Sqllog;
-use super::SyncExporter;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -49,14 +49,30 @@ impl SyncCsvExporter {
         let fields = [
             Self::escape_csv_field(&record.occurrence_time),
             Self::escape_csv_field(&record.ep),
-            Self::escape_csv_field(&record.session.as_ref().unwrap_or(&String::new())),
-            Self::escape_csv_field(&record.thread.as_ref().unwrap_or(&String::new())),
-            Self::escape_csv_field(&record.user.as_ref().unwrap_or(&String::new())),
-            Self::escape_csv_field(&record.trx_id.as_ref().unwrap_or(&String::new())),
-            Self::escape_csv_field(&record.statement.as_ref().unwrap_or(&String::new())),
-            Self::escape_csv_field(&record.appname.as_ref().unwrap_or(&String::new())),
-            Self::escape_csv_field(&record.ip.as_ref().unwrap_or(&String::new())),
-            Self::escape_csv_field(&record.sql_type.as_ref().unwrap_or(&String::new())),
+            Self::escape_csv_field(
+                &record.session.as_ref().unwrap_or(&String::new()),
+            ),
+            Self::escape_csv_field(
+                &record.thread.as_ref().unwrap_or(&String::new()),
+            ),
+            Self::escape_csv_field(
+                &record.user.as_ref().unwrap_or(&String::new()),
+            ),
+            Self::escape_csv_field(
+                &record.trx_id.as_ref().unwrap_or(&String::new()),
+            ),
+            Self::escape_csv_field(
+                &record.statement.as_ref().unwrap_or(&String::new()),
+            ),
+            Self::escape_csv_field(
+                &record.appname.as_ref().unwrap_or(&String::new()),
+            ),
+            Self::escape_csv_field(
+                &record.ip.as_ref().unwrap_or(&String::new()),
+            ),
+            Self::escape_csv_field(
+                &record.sql_type.as_ref().unwrap_or(&String::new()),
+            ),
             Self::escape_csv_field(&record.description),
             record.execute_time.map(|t| t.to_string()).unwrap_or_default(),
             record.rowcount.map(|r| r.to_string()).unwrap_or_default(),
@@ -112,6 +128,11 @@ impl SyncExporter for SyncCsvExporter {
     }
 
     fn finalize(&mut self) -> Result<()> {
+        // 如果还没有写入头部，说明没有数据，但仍需要写入头部
+        if !self.header_written {
+            self.write_header()?;
+        }
+
         self.writer.flush()?;
         self.stats.finish();
 

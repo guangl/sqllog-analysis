@@ -1,184 +1,108 @@
-//! SQL 日志分析工具
-//!
-//! 支持多线程并发解析和多格式导出
+//! SQL 日志分析工具 - 使用 clap 进行命令行解析
 
+use clap::{Parser, Subcommand, ValueEnum};
 use sqllog_analysis::config::SqllogConfig;
 use sqllog_analysis::prelude::*;
-use std::env;
 use std::path::PathBuf;
 
+/// SQL 日志分析工具
+#[derive(Parser)]
+#[command(name = "sqllog-cli")]
+#[command(about = "达梦数据库 SQL 日志分析工具")]
+#[command(version = sqllog_analysis::VERSION)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
+    /// 启用详细日志输出
+    #[arg(short, long)]
+    verbose: bool,
+
+    /// 批处理大小
+    #[arg(short, long, default_value = "1000")]
+    batch_size: usize,
+
+    /// 线程数量 (0 表示自动)
+    #[arg(short, long, default_value = "0")]
+    threads: usize,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// 解析日志文件（仅解析，不导出）
+    Parse {
+        /// 日志文件路径
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// 解析并导出日志文件
+    Export {
+        /// 日志文件路径
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+
+        /// 输出文件基础路径（不含扩展名）
+        #[arg(short, long, default_value = "output/export_result")]
+        output: String,
+
+        /// 导出格式
+        #[arg(short, long, value_enum)]
+        format: Option<ExportFormat>,
+    },
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum ExportFormat {
+    /// CSV 格式
+    Csv,
+    /// JSON 格式
+    Json,
+    /// SQLite 数据库
+    Sqlite,
+    /// DuckDB 数据库
+    Duckdb,
+    /// 所有可用格式
+    Auto,
+}
+
 fn main() -> Result<()> {
+    let cli = Cli::parse();
+
     // 初始化日志系统
     #[cfg(feature = "logging")]
     {
+        let log_level = if cli.verbose { "debug" } else { "info" };
         tracing_subscriber::fmt()
             .with_env_filter(
-                env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+                std::env::var("RUST_LOG")
+                    .unwrap_or_else(|_| log_level.to_string()),
             )
             .init();
         tracing::info!("SQL日志分析工具启动");
     }
 
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 {
-        print_usage(&args[0]);
-        return Ok(());
+    // 创建配置
+    let mut config = SqllogConfig::default();
+    config.batch_size = cli.batch_size;
+    if cli.threads > 0 {
+        config.thread_count = Some(cli.threads);
     }
 
-    #[cfg(feature = "logging")]
-    tracing::debug!("命令行参数: {:?}", args);
-
-    match args[1].as_str() {
-        "parse" => {
-            #[cfg(feature = "logging")]
-            tracing::info!("执行解析命令");
-
-            let files = get_file_args(&args[2..]);
-            if files.is_empty() {
-                eprintln!("错误: 至少需要指定一个日志文件");
-                return Ok(());
-            }
-            run_parse_only(&files)
-        }
-        "export" => {
-            #[cfg(feature = "logging")]
-            tracing::info!("执行导出命令");
-
-            let options = parse_export_args(&args[2..]);
-            if options.files.is_empty() {
-                eprintln!("错误: 至少需要指定一个日志文件");
-                return Ok(());
-            }
-            run_concurrent_export(&options)
-        }
-        "help" | "--help" | "-h" => {
-            print_usage(&args[0]);
-            Ok(())
-        }
-        _ => {
-            eprintln!("未知命令: {}", args[1]);
-            print_usage(&args[0]);
-            Ok(())
+    match cli.command {
+        Commands::Parse { files } => run_parse_only(&files, config),
+        Commands::Export { files, output, format } => {
+            run_export(&files, &output, format, config)
         }
     }
-}
-
-fn print_usage(program_name: &str) {
-    println!("SQL 日志分析工具 v{}", sqllog_analysis::VERSION);
-    println!();
-    println!("用法:");
-    println!("  {} <命令> [选项]", program_name);
-    println!();
-    println!("命令:");
-    println!("  parse <文件...>     - 解析日志文件（不导出）");
-    println!("  export <文件...>    - 解析并导出日志文件");
-    println!("  demo                - 运行演示程序");
-    println!("  help                - 显示此帮助信息");
-    println!();
-    println!("示例:");
-    println!("  {} parse logs/app.log", program_name);
-    println!("  {} export sqllog/*.log", program_name);
-    println!("  {} demo", program_name);
-    println!();
-    println!("特性支持:");
-    #[cfg(feature = "exporter-csv")]
-    println!("  ✓ CSV 导出");
-    #[cfg(not(feature = "exporter-csv"))]
-    println!("  ✗ CSV 导出 (需要 --features=\"exporter-csv\")");
-
-    #[cfg(feature = "exporter-json")]
-    println!("  ✓ JSON 导出");
-    #[cfg(not(feature = "exporter-json"))]
-    println!("  ✗ JSON 导出 (需要 --features=\"exporter-json\")");
-
-    #[cfg(feature = "exporter-duckdb")]
-    println!("  ✓ DuckDB 导出");
-    #[cfg(not(feature = "exporter-duckdb"))]
-    println!("  ✗ DuckDB 导出 (需要 --features=\"exporter-duckdb\")");
-
-    #[cfg(feature = "exporter-sqlite")]
-    println!("  ✓ SQLite 导出");
-    #[cfg(not(feature = "exporter-sqlite"))]
-    println!("  ✗ SQLite 导出 (需要 --features=\"exporter-sqlite\")");
-}
-
-#[derive(Debug)]
-struct ExportOptions {
-    files: Vec<PathBuf>,
-    output: Option<String>,
-    format: Option<String>,
-    batch_size: Option<usize>,
-}
-
-fn parse_export_args(args: &[String]) -> ExportOptions {
-    let mut options = ExportOptions {
-        files: Vec::new(),
-        output: None,
-        format: None,
-        batch_size: None,
-    };
-
-    let mut i = 0;
-    while i < args.len() {
-        let arg = &args[i];
-        match arg.as_str() {
-            "--output" => {
-                i += 1;
-                if i < args.len() {
-                    options.output = Some(args[i].clone());
-                }
-            }
-            "--format" => {
-                i += 1;
-                if i < args.len() {
-                    options.format = Some(args[i].clone());
-                }
-            }
-            "--batch-size" => {
-                i += 1;
-                if i < args.len() {
-                    if let Ok(size) = args[i].parse::<usize>() {
-                        options.batch_size = Some(size);
-                    }
-                }
-            }
-            "--limit" => {
-                i += 1;
-                if i < args.len() {
-                    // 忽略limit参数，不再支持
-                    println!("警告: --limit 参数已被移除");
-                }
-            }
-            _ => {
-                if !arg.starts_with("--") {
-                    let path = PathBuf::from(arg);
-                    if path.exists() {
-                        options.files.push(path);
-                    }
-                }
-            }
-        }
-        i += 1;
-    }
-
-    options
-}
-
-fn get_file_args(args: &[String]) -> Vec<PathBuf> {
-    args.iter().map(|s| PathBuf::from(s)).filter(|p| p.exists()).collect()
 }
 
 /// 只解析，不导出
-fn run_parse_only(files: &[PathBuf]) -> Result<()> {
+fn run_parse_only(files: &[PathBuf], config: SqllogConfig) -> Result<()> {
     println!("=== 解析模式 ===");
     println!("文件数量: {}", files.len());
 
     #[cfg(feature = "logging")]
     tracing::info!("开始解析 {} 个文件", files.len());
-
-    // 使用新的默认配置：batch_size = 0, thread_count = Some(0)
-    let config = SqllogConfig::default();
 
     let parser = ConcurrentParser::new(config);
 
@@ -205,7 +129,7 @@ fn run_parse_only(files: &[PathBuf]) -> Result<()> {
                 "  {}. {} [{}] {}",
                 i + 1,
                 record.occurrence_time,
-                record.sql_type.as_deref().unwrap_or("未知"),
+                record.sql_type.as_deref().unwrap_or("UNKNOWN"),
                 record.description.chars().take(80).collect::<String>()
             );
         }
@@ -215,168 +139,204 @@ fn run_parse_only(files: &[PathBuf]) -> Result<()> {
 }
 
 /// 并发解析和导出
-#[cfg(any(
-    feature = "exporter-csv",
-    feature = "exporter-json",
-    feature = "exporter-sqlite",
-    feature = "exporter-duckdb"
-))]
-fn run_concurrent_export(options: &ExportOptions) -> Result<()> {
+fn run_export(
+    files: &[PathBuf],
+    output_base: &str,
+    format: Option<ExportFormat>,
+    config: SqllogConfig,
+) -> Result<()> {
     println!("=== 并发导出模式 ===");
-    println!("文件数量: {}", options.files.len());
+    println!("文件数量: {}", files.len());
 
     #[cfg(feature = "logging")]
     tracing::info!(
-        "开始并发导出: {} 个文件, 格式: {:?}, 输出: {:?}",
-        options.files.len(),
-        options.format,
-        options.output
+        "开始并发导出: {} 个文件, 格式: {:?}, 输出: {}",
+        files.len(),
+        format,
+        output_base
     );
-
-    // 使用新的默认配置：batch_size = 0, thread_count = Some(0)
-    let mut config = SqllogConfig::default();
-
-    // 应用批量大小配置
-    if let Some(batch_size) = options.batch_size {
-        config.batch_size = batch_size;
-    }
 
     let parser = ConcurrentParser::new(config);
 
-    // 创建导出器
-    let mut exporters: Vec<Box<dyn SyncExporter + Send>> = Vec::new();
+    // 第一步：并发解析所有文件
+    println!("开始并发解析文件...");
+    let parse_start = std::time::Instant::now();
+    let (records, parse_errors) = parser.parse_files_concurrent(files)?;
+    let parse_duration = parse_start.elapsed();
 
-    // 根据format选项或默认创建导出器
-    let format = options.format.as_deref().unwrap_or("auto");
-    let output_base =
-        options.output.as_deref().unwrap_or("output/export_result");
+    println!(
+        "解析完成: {} 条记录，{} 个错误，耗时: {:?}",
+        records.len(),
+        parse_errors.len(),
+        parse_duration
+    );
+
+    if records.is_empty() {
+        println!("没有记录需要导出");
+        return Ok(());
+    }
 
     // 确保输出目录存在
     if let Some(parent) = PathBuf::from(output_base).parent() {
         std::fs::create_dir_all(parent)?;
     }
 
+    let export_start = std::time::Instant::now();
+
+    // 根据格式进行导出
+    match format.unwrap_or(ExportFormat::Auto) {
+        ExportFormat::Csv => {
+            export_single_format(&records, output_base, "csv")?
+        }
+        ExportFormat::Json => {
+            export_single_format(&records, output_base, "json")?
+        }
+        ExportFormat::Sqlite => {
+            export_single_format(&records, output_base, "sqlite")?
+        }
+        ExportFormat::Duckdb => {
+            export_single_format(&records, output_base, "duckdb")?
+        }
+        ExportFormat::Auto => export_all_formats(&records, output_base)?,
+    }
+
+    let export_duration = export_start.elapsed();
+    let total_duration = parse_start.elapsed();
+
+    println!("\n=== 处理总结 ===");
+    println!("总处理时间: {:?}", total_duration);
+    println!("解析耗时: {:?}", parse_duration);
+    println!("导出耗时: {:?}", export_duration);
+    println!("解析错误: {} 个", parse_errors.len());
+
+    if !parse_errors.is_empty() {
+        println!("\n前几个解析错误:");
+        for (i, error) in parse_errors.iter().take(3).enumerate() {
+            println!("  {}. 第{}行: {}", i + 1, error.line, error.error);
+        }
+    }
+
+    println!("导出完成！");
+    Ok(())
+}
+
+/// 导出到单一格式
+fn export_single_format(
+    records: &[sqllog_analysis::sqllog::types::Sqllog],
+    output_base: &str,
+    format: &str,
+) -> Result<()> {
     match format {
         #[cfg(feature = "exporter-csv")]
         "csv" => {
-            println!("添加 CSV 导出器");
+            println!("导出到 CSV 格式...");
             let output_path = format!("{}.csv", output_base);
-            exporters.push(Box::new(SyncCsvExporter::new(&output_path)?));
+            export_records_sync(&records, SyncCsvExporter::new(&output_path)?)?;
         }
         #[cfg(feature = "exporter-json")]
         "json" => {
-            println!("添加 JSON 导出器");
+            println!("导出到 JSON 格式...");
             let output_path = format!("{}.json", output_base);
-            exporters.push(Box::new(SyncJsonExporter::new(&output_path)?));
+            export_records_sync(
+                &records,
+                SyncJsonExporter::new(&output_path)?,
+            )?;
         }
         #[cfg(feature = "exporter-sqlite")]
         "sqlite" => {
-            println!("添加 SQLite 导出器");
+            println!("导出到 SQLite 格式...");
             let output_path = format!("{}.sqlite", output_base);
-            exporters.push(Box::new(SyncSqliteExporter::new(&PathBuf::from(
-                output_path,
-            ))?));
+            export_records_sync(
+                &records,
+                SyncSqliteExporter::new(&PathBuf::from(output_path))?,
+            )?;
         }
         #[cfg(feature = "exporter-duckdb")]
         "duckdb" => {
-            println!("添加 DuckDB 导出器");
+            println!("导出到 DuckDB 格式...");
             let output_path = format!("{}.duckdb", output_base);
-            exporters.push(Box::new(SyncDuckdbExporter::new(&PathBuf::from(
-                output_path,
-            ))?));
+            export_records_sync(
+                &records,
+                SyncDuckdbExporter::new(&PathBuf::from(output_path))?,
+            )?;
         }
-        "auto" | _ => {
-            // 自动模式：添加所有可用的导出器
-            #[cfg(feature = "exporter-csv")]
-            {
-                println!("添加 CSV 导出器");
-                let output_path = format!("{}.csv", output_base);
-                exporters.push(Box::new(SyncCsvExporter::new(&output_path)?));
-            }
-
-            #[cfg(feature = "exporter-json")]
-            {
-                println!("添加 JSON 导出器");
-                let output_path = format!("{}.json", output_base);
-                exporters.push(Box::new(SyncJsonExporter::new(&output_path)?));
-            }
-
-            #[cfg(feature = "exporter-duckdb")]
-            {
-                println!("添加 DuckDB 导出器");
-                let output_path = format!("{}.duckdb", output_base);
-                exporters.push(Box::new(SyncDuckdbExporter::new(
-                    &PathBuf::from(output_path),
-                )?));
-            }
-
-            #[cfg(feature = "exporter-sqlite")]
-            {
-                println!("添加 SQLite 导出器");
-                let output_path = format!("{}.sqlite", output_base);
-                exporters.push(Box::new(SyncSqliteExporter::new(
-                    &PathBuf::from(output_path),
-                )?));
-            }
-        }
-    }
-
-    if exporters.is_empty() {
-        println!("警告: 没有可用的导出器");
-        println!("请使用 --features 启用导出器，例如:");
-        println!("  cargo run --features=\"exporter-csv,exporter-json\"");
-        return Ok(());
-    }
-
-    println!("导出器数量: {}", exporters.len());
-
-    let summary =
-        parser.parse_and_export_concurrent(&options.files, exporters)?;
-
-    println!("\n=== 处理总结 ===");
-    println!("总处理时间: {:?}", summary.total_duration);
-    println!("解析耗时: {:?}", summary.parse_duration);
-    println!("导出耗时: {:?}", summary.export_duration);
-    println!("解析错误: {} 个", summary.parse_errors.len());
-
-    let mut total_exported = 0;
-    for (name, stat) in &summary.export_stats {
-        println!("\n{}: ", name);
-        println!("  导出记录: {} 条", stat.exported_records);
-        println!("  失败记录: {} 条", stat.failed_records);
-        total_exported += stat.exported_records;
-    }
-
-    println!("\n总导出记录: {} 条", total_exported);
-    if total_exported > 0 {
-        println!(
-            "总处理速度: {:.2} 记录/秒",
-            total_exported as f64 / summary.total_duration.as_secs_f64()
-        );
-        println!(
-            "解析速度: {:.2} 记录/秒",
-            total_exported as f64 / summary.parse_duration.as_secs_f64()
-        );
-        if summary.export_duration.as_secs_f64() > 0.0 {
-            println!(
-                "导出速度: {:.2} 记录/秒",
-                total_exported as f64 / summary.export_duration.as_secs_f64()
+        _ => {
+            eprintln!(
+                "错误: {} 导出器未启用。请使用 --features=\"exporter-{}\" 重新编译。",
+                format.to_uppercase(),
+                format
             );
         }
+    }
+    Ok(())
+}
+
+/// 导出到所有可用格式
+fn export_all_formats(
+    records: &[sqllog_analysis::sqllog::types::Sqllog],
+    output_base: &str,
+) -> Result<()> {
+    println!("自动模式：导出到所有可用格式...");
+
+    #[cfg(feature = "exporter-csv")]
+    {
+        println!("导出到 CSV...");
+        let output_path = format!("{}.csv", output_base);
+        export_records_sync(&records, SyncCsvExporter::new(&output_path)?)?;
+    }
+
+    #[cfg(feature = "exporter-json")]
+    {
+        println!("导出到 JSON...");
+        let output_path = format!("{}.json", output_base);
+        export_records_sync(&records, SyncJsonExporter::new(&output_path)?)?;
+    }
+
+    #[cfg(feature = "exporter-sqlite")]
+    {
+        println!("导出到 SQLite...");
+        let output_path = format!("{}.sqlite", output_base);
+        export_records_sync(
+            &records,
+            SyncSqliteExporter::new(&PathBuf::from(output_path))?,
+        )?;
+    }
+
+    #[cfg(feature = "exporter-duckdb")]
+    {
+        println!("导出到 DuckDB...");
+        let output_path = format!("{}.duckdb", output_base);
+        export_records_sync(
+            &records,
+            SyncDuckdbExporter::new(&PathBuf::from(output_path))?,
+        )?;
     }
 
     Ok(())
 }
 
-#[cfg(not(any(
-    feature = "exporter-csv",
-    feature = "exporter-json",
-    feature = "exporter-sqlite",
-    feature = "exporter-duckdb"
-)))]
-fn run_concurrent_export(_options: &ExportOptions) -> Result<()> {
-    println!("导出功能需要启用导出器特性");
-    println!("请使用 --features 参数，例如:");
-    println!("  cargo run --features=\"exporter-csv,exporter-json\"");
+/// 辅助函数：使用同步导出器导出记录
+fn export_records_sync<E: SyncExporter>(
+    records: &[sqllog_analysis::sqllog::types::Sqllog],
+    mut exporter: E,
+) -> Result<()> {
+    let batch_size = 1000;
+    let total_records = records.len();
+
+    println!("开始导出 {} 条记录到 {}...", total_records, exporter.name());
+
+    for (i, chunk) in records.chunks(batch_size).enumerate() {
+        for record in chunk {
+            exporter.export_record(record)?;
+        }
+
+        let processed = ((i + 1) * batch_size).min(total_records);
+        if processed % 10000 == 0 || processed == total_records {
+            println!("已处理: {}/{} 条记录", processed, total_records);
+        }
+    }
+
+    exporter.finalize()?;
+    println!("导出到 {} 完成", exporter.name());
     Ok(())
 }
