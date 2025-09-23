@@ -6,3 +6,4 @@ logs/*
 *.csv
 *.json
 *.jsonl
+*.log

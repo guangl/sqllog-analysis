@@ -37,6 +37,21 @@ pub enum SqllogError {
     #[error("日志错误: {0}")]
     Log(#[from] crate::logging::LogError),
 
+    /// JSON 序列化错误（仅在启用 exporter-json feature 时可用）
+    #[cfg(feature = "exporter-json")]
+    #[error("JSON序列化错误: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// SQLite 数据库错误（仅在启用 exporter-sqlite feature 时可用）
+    #[cfg(feature = "exporter-sqlite")]
+    #[error("SQLite错误: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    /// DuckDB 数据库错误（仅在启用 exporter-duckdb feature 时可用）
+    #[cfg(feature = "exporter-duckdb")]
+    #[error("DuckDB错误: {0}")]
+    Duckdb(#[from] duckdb::Error),
+
     /// 其他错误
     #[error("未知错误: {0}")]
     Other(String),

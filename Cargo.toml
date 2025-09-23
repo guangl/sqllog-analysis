@@ -23,6 +23,7 @@ regex = "1.11"
 lazy_static = "1.5"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
 
 # 日志依赖（可选）
 tracing = { version = "0.1", optional = true }
@@ -36,12 +37,66 @@ tracing-appender = { version = "0.2", optional = true }
 # 异步运行时支持
 tokio = { version = "1.0", features = ["full"], optional = true }
 futures = { version = "0.3", optional = true }
+async-trait = { version = "0.1", optional = true }
+
+# 导出器依赖（可选）
+# CSV 导出 - 无需额外依赖，使用标准库
+serde_json = { version = "1.0", optional = true } # JSON 导出
+xlsxwriter = { version = "0.6", optional = true } # Excel 导出
+rusqlite = { version = "0.29", features = [
+    "bundled",
+], optional = true } # SQLite 导出
+duckdb = { version = "1.1", features = [
+    "bundled",
+], optional = true } # DuckDB 导出
+tokio-postgres = { version = "0.7", optional = true } # PostgreSQL 导出
+oracle = { version = "0.6", optional = true } # Oracle 导出
 
 [dev-dependencies]
 tempfile = "3.0"
 
 [features]
-default = ["logging"]
+default = ["logging", "sync"]
 logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
 tokio = ["dep:tokio"]
-async = ["dep:tokio", "dep:futures", "logging"]
+sync = []
+async = ["dep:tokio", "dep:futures", "dep:async-trait", "logging"]
+
+# 导出器功能特性 - 同步版本
+exporter-csv = []
+exporter-json = ["dep:serde_json"]
+exporter-excel = ["dep:xlsxwriter"]
+exporter-sqlite = ["dep:rusqlite"]
+exporter-duckdb = ["dep:duckdb"]
+exporter-postgres = ["dep:tokio-postgres"]
+exporter-oracle = ["dep:oracle"]
+
+# 导出器功能特性 - 异步版本
+exporter-csv-async = ["async", "exporter-csv"]
+exporter-json-async = ["async", "exporter-json"]
+exporter-excel-async = ["async", "exporter-excel"]
+exporter-sqlite-async = ["async", "exporter-sqlite"]
+exporter-duckdb-async = ["async", "exporter-duckdb"]
+exporter-postgres-async = ["async", "exporter-postgres"]
+exporter-oracle-async = ["async", "exporter-oracle"]
+
+# 导出器组合
+all-exporters = [
+    "exporter-csv",
+    "exporter-json",
+    "exporter-excel",
+    "exporter-sqlite",
+    "exporter-duckdb",
+    "exporter-postgres",
+    "exporter-oracle",
+]
+
+all-exporters-async = [
+    "exporter-csv-async",
+    "exporter-json-async",
+    "exporter-excel-async",
+    "exporter-sqlite-async",
+    "exporter-duckdb-async",
+    "exporter-postgres-async",
+    "exporter-oracle-async",
+]
