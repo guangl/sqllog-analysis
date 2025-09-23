@@ -195,7 +195,7 @@ fn demo_parse_only() -> Result<()> {
                 "  {}. {} - {} - {}",
                 i + 1,
                 record.occurrence_time,
-                record.sql_type,
+                record.sql_type.as_deref().unwrap_or("未知"),
                 record.description.chars().take(50).collect::<String>()
             );
         }

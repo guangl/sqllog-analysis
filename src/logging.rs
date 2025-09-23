@@ -35,7 +35,7 @@ impl LogConfig {
 
 impl Default for LogConfig {
     fn default() -> Self {
-        Self { level: Level::DEBUG }
+        Self { level: Level::TRACE } // 改为TRACE级别以显示更详细的调试信息
     }
 }
 

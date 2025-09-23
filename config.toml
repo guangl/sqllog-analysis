@@ -1,7 +1,7 @@
 [log]
 enable_stdout = true
 log_dir = "logs"
-level = "debug"
+level = "trace"
 
 [sqllog]
 sqllog_dir = "sqllog"

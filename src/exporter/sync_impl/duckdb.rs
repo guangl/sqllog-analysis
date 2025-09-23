@@ -140,11 +140,9 @@ impl SyncExporter for SyncDuckdbExporter {
     }
 
     fn finalize(&mut self) -> Result<(), crate::error::SqllogError> {
-        if !self.is_temp_db {
-            let mut conn =
-                self.connection.lock().map_err(|e| SqllogError::Duckdb)?;
-            Self::create_indexes_sync(&mut conn)?;
-        }
+        let mut conn =
+            self.connection.lock().map_err(|e| SqllogError::Duckdb)?;
+        Self::create_indexes_sync(&mut conn)?;
         Ok(())
     }
 

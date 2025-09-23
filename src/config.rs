@@ -25,9 +25,9 @@ pub struct LogConfig {
 /// SQL 日志解析配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqllogConfig {
-    /// 最大并发线程数，默认为文件数量
+    /// 最大并发线程数，0 表示自动根据文件数量确定
     pub thread_count: Option<usize>,
-    /// 每个线程处理的批次大小
+    /// 每个线程处理的批次大小，0 表示不分块直接解析整个文件
     pub batch_size: usize,
     /// 任务队列缓冲大小
     pub queue_buffer_size: usize,
@@ -52,8 +52,8 @@ impl Default for LogConfig {
 impl Default for SqllogConfig {
     fn default() -> Self {
         Self {
-            thread_count: None, // 默认为文件数量
-            batch_size: 1000,
+            thread_count: Some(0), // 默认为0，表示自动根据文件数量确定
+            batch_size: 0,         // 默认为0，表示不分块直接解析整个文件
             queue_buffer_size: 10000,
         }
     }
