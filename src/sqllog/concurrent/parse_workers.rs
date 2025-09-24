@@ -2,7 +2,10 @@
 
 use crate::error::Result;
 use std::collections::VecDeque;
+use std::fs::OpenOptions;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -12,38 +15,7 @@ use std::thread;
     feature = "exporter-sqlite",
     feature = "exporter-duckdb"
 ))]
-use std::sync::mpsc;
-
-#[cfg(any(
-    feature = "exporter-csv",
-    feature = "exporter-json",
-    feature = "exporter-sqlite",
-    feature = "exporter-duckdb"
-))]
 use crate::exporter::sync_impl::SyncExporter;
-
-#[cfg(any(
-    feature = "exporter-csv",
-    feature = "exporter-json",
-    feature = "exporter-sqlite",
-    feature = "exporter-duckdb"
-))]
-/// 批次数据类型
-type BatchData = Vec<crate::sqllog::types::Sqllog>;
-
-#[cfg(any(
-    feature = "exporter-csv",
-    feature = "exporter-json",
-    feature = "exporter-sqlite",
-    feature = "exporter-duckdb"
-))]
-/// 导出任务消息
-enum ExportMessage {
-    /// 批次数据
-    Batch(BatchData),
-    /// 结束信号
-    Finish,
-}
 
 #[cfg(any(
     feature = "exporter-csv",
@@ -62,6 +34,7 @@ pub fn parse_and_export_concurrent<E: SyncExporter + Send + 'static>(
     mut exporter: E,
     batch_size: usize,
     thread_count: usize,
+    errors_out: Option<String>,
 ) -> Result<Vec<(usize, usize)>> {
     #[cfg(feature = "logging")]
     let start_time = std::time::Instant::now();
@@ -83,6 +56,73 @@ pub fn parse_and_export_concurrent<E: SyncExporter + Send + 'static>(
 
     // 创建导出消息队列
     let (export_tx, export_rx) = mpsc::channel::<ExportMessage>();
+
+    // 仅在指定 errors_out 时创建错误写入通道和线程（写入 JSONL）
+    // 创建两个可选值：一个用于发送通道，另一个用于写入线程的 JoinHandle
+    let (maybe_err_tx, maybe_err_handle): (
+        Option<mpsc::Sender<Vec<crate::sqllog::sync_parser::ParseError>>>,
+        Option<std::thread::JoinHandle<()>>,
+    ) = if let Some(path) = errors_out.clone() {
+        let (err_tx, err_rx) =
+            mpsc::channel::<Vec<crate::sqllog::sync_parser::ParseError>>();
+        let errors_out_path = path.clone();
+
+        let err_handle = thread::spawn(move || {
+            // 打开文件以追加模式写入
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&errors_out_path);
+
+            let mut writer = match file {
+                Ok(f) => BufWriter::new(f),
+                Err(e) => {
+                    #[cfg(feature = "logging")]
+                    tracing::error!(
+                        "无法打开错误输出文件 {}: {}",
+                        errors_out_path,
+                        e
+                    );
+                    return;
+                }
+            };
+
+            for batch in err_rx.iter() {
+                for e in batch {
+                    // 使用 serde_json 序列化每个 ParseError 为一行 JSONL
+                    match serde_json::to_string(&e) {
+                        Ok(json_line) => {
+                            if let Err(write_err) = writer.write_all(
+                                format!("{}\n", json_line).as_bytes(),
+                            ) {
+                                #[cfg(feature = "logging")]
+                                tracing::error!(
+                                    "写入错误文件失败: {}",
+                                    write_err
+                                );
+                            }
+                        }
+                        Err(ser_err) => {
+                            #[cfg(feature = "logging")]
+                            tracing::error!("序列化解析错误失败: {}", ser_err);
+                        }
+                    }
+                }
+
+                if let Err(flush_err) = writer.flush() {
+                    #[cfg(feature = "logging")]
+                    tracing::error!("刷新错误文件失败: {}", flush_err);
+                }
+            }
+
+            #[cfg(feature = "logging")]
+            tracing::info!("错误写入线程退出: {}", errors_out_path);
+        });
+
+        (Some(err_tx), Some(err_handle))
+    } else {
+        (None, None)
+    };
 
     // 启动导出线程
     let export_handle = thread::spawn(move || -> Result<()> {
@@ -172,6 +212,9 @@ pub fn parse_and_export_concurrent<E: SyncExporter + Send + 'static>(
         let results = Arc::clone(&results);
         let export_tx = export_tx.clone();
 
+        // 每个解析线程使用 maybe_err_tx 的克隆句柄，避免移动原始
+        let thread_err_tx = maybe_err_tx.clone();
+
         let handle = thread::spawn(move || {
             #[cfg(feature = "logging")]
             tracing::info!("解析线程 {} 启动", thread_id);
@@ -203,6 +246,9 @@ pub fn parse_and_export_concurrent<E: SyncExporter + Send + 'static>(
                         thread_id,
                         batch_size
                     );
+
+                    // 使用在外部克隆好的句柄（Option）
+                    let err_tx_opt = thread_err_tx.clone();
 
                     let parse_result =
                         crate::sqllog::SyncSqllogParser::parse_with_hooks(
@@ -247,6 +293,29 @@ pub fn parse_and_export_concurrent<E: SyncExporter + Send + 'static>(
                                         "线程 {} 跳过空批次",
                                         thread_id
                                     );
+                                }
+
+                                // 将解析错误发送到错误写入线程
+                                if !batch_errors.is_empty() {
+                                    if let Some(ref tx) = err_tx_opt {
+                                        if let Err(e) =
+                                            tx.send(batch_errors.to_vec())
+                                        {
+                                            #[cfg(feature = "logging")]
+                                            tracing::error!(
+                                                "线程 {} 发送解析错误到错误写入线程失败: {}",
+                                                thread_id,
+                                                e
+                                            );
+                                        }
+                                    } else {
+                                        // errors_out 未配置，跳过写入
+                                        #[cfg(feature = "logging")]
+                                        tracing::trace!(
+                                            "线程 {} 收到解析错误但 errors_out 未配置，跳过写入",
+                                            thread_id
+                                        );
+                                    }
                                 }
                             },
                         );
@@ -325,6 +394,9 @@ pub fn parse_and_export_concurrent<E: SyncExporter + Send + 'static>(
 
     drop(export_tx); // 关闭发送端
 
+    // 所有解析线程完成，关闭错误发送通道（如果创建了 writer 线程则会触发其退出）
+    drop(maybe_err_tx);
+
     #[cfg(feature = "logging")]
     tracing::debug!("开始等待导出线程完成");
 
@@ -346,6 +418,14 @@ pub fn parse_and_export_concurrent<E: SyncExporter + Send + 'static>(
                 "导出线程异常退出",
             )
             .into());
+        }
+    }
+
+    // 等待错误写入线程完成（如果存在）
+    if let Some(handle) = maybe_err_handle {
+        if let Err(e) = handle.join() {
+            #[cfg(feature = "logging")]
+            tracing::error!("错误写入线程异常退出: {:?}", e);
         }
     }
 
@@ -374,6 +454,7 @@ pub fn parse_files_concurrent(
     file_paths: &[PathBuf],
     batch_size: usize,
     thread_count: usize,
+    errors_out: Option<String>,
 ) -> Result<(
     Vec<crate::sqllog::types::Sqllog>,
     Vec<crate::sqllog::sync_parser::ParseError>,
@@ -395,6 +476,84 @@ pub fn parse_files_concurrent(
     if file_paths.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
+
+    // 仅在指定 errors_out 时创建错误写入通道和线程（写入 JSONL）
+    let (maybe_err_tx, maybe_err_handle): (
+        Option<mpsc::Sender<Vec<crate::sqllog::sync_parser::ParseError>>>,
+        Option<std::thread::JoinHandle<()>>,
+    ) = if let Some(path) = errors_out.clone() {
+        let (err_tx, err_rx) =
+            mpsc::channel::<Vec<crate::sqllog::sync_parser::ParseError>>();
+        let errors_out_path = path.clone();
+
+        let err_handle = thread::spawn(move || {
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&errors_out_path);
+
+            let mut writer = match file {
+                Ok(f) => BufWriter::new(f),
+                Err(e) => {
+                    #[cfg(feature = "logging")]
+                    tracing::error!(
+                        "无法打开错误输出文件 {}: {}",
+                        errors_out_path,
+                        e
+                    );
+                    return;
+                }
+            };
+
+            fn json_escape_str(s: &str) -> String {
+                let mut out = String::with_capacity(s.len() + 2);
+                out.push('"');
+                for c in s.chars() {
+                    match c {
+                        '\\' => out.push_str("\\\\"),
+                        '"' => out.push_str("\\\""),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        c if c.is_control() => {
+                            out.push_str(&format!("\\u{:04x}", c as u32));
+                        }
+                        _ => out.push(c),
+                    }
+                }
+                out.push('"');
+                out
+            }
+
+            for batch in err_rx.iter() {
+                for e in batch {
+                    let line = format!(
+                        "{{\"line\":{},\"error\":{},\"content\":{}}}\n",
+                        e.line,
+                        json_escape_str(&e.error),
+                        json_escape_str(&e.content)
+                    );
+
+                    if let Err(write_err) = writer.write_all(line.as_bytes()) {
+                        #[cfg(feature = "logging")]
+                        tracing::error!("写入错误文件失败: {}", write_err);
+                    }
+                }
+
+                if let Err(flush_err) = writer.flush() {
+                    #[cfg(feature = "logging")]
+                    tracing::error!("刷新错误文件失败: {}", flush_err);
+                }
+            }
+
+            #[cfg(feature = "logging")]
+            tracing::info!("错误写入线程退出: {}", errors_out_path);
+        });
+
+        (Some(err_tx), Some(err_handle))
+    } else {
+        (None, None)
+    };
 
     // 创建文件队列和结果收集
     let file_paths_owned: Vec<(usize, PathBuf)> =
@@ -421,6 +580,9 @@ pub fn parse_files_concurrent(
         let all_records = Arc::clone(&all_records);
         let all_errors = Arc::clone(&all_errors);
 
+        // clone maybe_err_tx for this parse thread to avoid moving original
+        let thread_err_tx = maybe_err_tx.clone();
+
         let handle = thread::spawn(move || {
             #[cfg(feature = "logging")]
             tracing::info!("解析线程 {} 启动", thread_id);
@@ -446,6 +608,9 @@ pub fn parse_files_concurrent(
                     let mut file_errors = Vec::new();
 
                     // 解析文件
+
+                    let err_tx_opt = thread_err_tx.clone();
+
                     let parse_result =
                         crate::sqllog::SyncSqllogParser::parse_with_hooks(
                             &file_path,
@@ -453,6 +618,27 @@ pub fn parse_files_concurrent(
                             |batch_records, batch_errors| {
                                 file_records.extend_from_slice(batch_records);
                                 file_errors.extend_from_slice(batch_errors);
+
+                                if !batch_errors.is_empty() {
+                                    if let Some(ref tx) = err_tx_opt {
+                                        if let Err(e) =
+                                            tx.send(batch_errors.to_vec())
+                                        {
+                                            #[cfg(feature = "logging")]
+                                            tracing::error!(
+                                                "线程 {} 发送解析错误到错误写入线程失败: {}",
+                                                thread_id,
+                                                e
+                                            );
+                                        }
+                                    } else {
+                                        #[cfg(feature = "logging")]
+                                        tracing::trace!(
+                                            "线程 {} 收到解析错误但 errors_out 未配置，跳过写入",
+                                            thread_id
+                                        );
+                                    }
+                                }
                             },
                         );
 
@@ -508,6 +694,15 @@ pub fn parse_files_concurrent(
         Arc::try_unwrap(all_records).unwrap().into_inner().unwrap();
     let final_errors =
         Arc::try_unwrap(all_errors).unwrap().into_inner().unwrap();
+
+    // 所有解析线程完成，关闭错误通道并等待写入线程（如果存在）
+    drop(maybe_err_tx);
+    if let Some(handle) = maybe_err_handle {
+        if let Err(e) = handle.join() {
+            #[cfg(feature = "logging")]
+            tracing::error!("错误写入线程异常退出: {:?}", e);
+        }
+    }
 
     #[cfg(feature = "logging")]
     {
@@ -601,9 +796,14 @@ mod tests {
     #[test]
     fn test_parse_and_export_concurrent_empty_files() {
         let exporter = DummyExporter::new(false);
-        let res =
-            parse_and_export_concurrent::<DummyExporter>(&[], exporter, 10, 2)
-                .unwrap();
+        let res = parse_and_export_concurrent::<DummyExporter>(
+            &[],
+            exporter,
+            10,
+            2,
+            None,
+        )
+        .unwrap();
         assert_eq!(res.len(), 0);
     }
 
@@ -613,7 +813,7 @@ mod tests {
         let (_d, path) = write_temp_file(content);
 
         let exporter = DummyExporter::new(true);
-        let res = parse_and_export_concurrent(&[path], exporter, 10, 1);
+        let res = parse_and_export_concurrent(&[path], exporter, 10, 1, None);
         assert!(res.is_err(), "expected exporter error to surface");
     }
 
@@ -624,7 +824,8 @@ mod tests {
 Another bad line"#;
         let (_d, path) = write_temp_file(content);
 
-        let (records, errors) = parse_files_concurrent(&[path], 10, 1).unwrap();
+        let (records, errors) =
+            parse_files_concurrent(&[path], 10, 1, None).unwrap();
         assert_eq!(records.len(), 1);
         assert!(errors.len() >= 1);
     }
@@ -658,7 +859,7 @@ Another bad line"#;
         let (_d, path) = write_temp_file(content);
 
         let exporter = FinalizeFailExporter;
-        let res = parse_and_export_concurrent(&[path], exporter, 10, 1);
+        let res = parse_and_export_concurrent(&[path], exporter, 10, 1, None);
         assert!(res.is_err(), "expected finalize error to surface");
     }
 
@@ -669,8 +870,8 @@ Another bad line"#;
         let (_d, path) = write_temp_file(content);
 
         let exporter = DummyExporter::new(false);
-        let res =
-            parse_and_export_concurrent(&[path], exporter, 10, 1).unwrap();
+        let res = parse_and_export_concurrent(&[path], exporter, 10, 1, None)
+            .unwrap();
         // one file processed
         assert_eq!(res.len(), 1);
         // no records parsed
@@ -711,7 +912,7 @@ Another bad line"#;
         let (_d, path) = write_temp_file(content);
 
         let exporter = PanicExporter;
-        let res = parse_and_export_concurrent(&[path], exporter, 10, 1);
+        let res = parse_and_export_concurrent(&[path], exporter, 10, 1, None);
 
         // export thread panicked -> parse_and_export_concurrent should return an error
         assert!(res.is_err(), "expected error when export thread panics");
@@ -720,7 +921,8 @@ Another bad line"#;
     #[test]
     fn test_parse_files_concurrent_empty_input() {
         // empty file list should return empty records and errors
-        let (records, errors) = parse_files_concurrent(&[], 10, 1).unwrap();
+        let (records, errors) =
+            parse_files_concurrent(&[], 10, 1, None).unwrap();
         assert!(records.is_empty());
         assert!(errors.is_empty());
     }
@@ -734,7 +936,7 @@ Another bad line"#;
         let (_d2, p2) = write_temp_file(content2);
 
         let (records, errors) =
-            parse_files_concurrent(&[p1, p2], 10, 0).unwrap();
+            parse_files_concurrent(&[p1, p2], 10, 0, None).unwrap();
 
         // one valid record from first file, at least one parse error from second
         assert_eq!(records.len(), 1);

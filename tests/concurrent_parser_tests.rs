@@ -1,7 +1,7 @@
-use sqllog_analysis::sqllog::concurrent::ConcurrentParser;
 use sqllog_analysis::config::SqllogConfig;
-use std::path::PathBuf;
+use sqllog_analysis::sqllog::concurrent::ConcurrentParser;
 use std::io::Write;
+use std::path::PathBuf;
 use tempfile::NamedTempFile;
 
 /// 创建测试SQL日志文件
@@ -29,6 +29,7 @@ fn create_multiple_test_files(record_counts: Vec<usize>) -> Vec<NamedTempFile> {
 #[test]
 fn test_concurrent_parser_creation() {
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(2),
         batch_size: 10,
         queue_buffer_size: 1000,
@@ -49,6 +50,7 @@ fn test_concurrent_parser_default_config() {
 #[test]
 fn test_concurrent_parser_custom_config() {
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(4),
         batch_size: 500,
         queue_buffer_size: 5000,
@@ -62,6 +64,7 @@ fn test_concurrent_parser_custom_config() {
 #[test]
 fn test_concurrent_parser_zero_threads() {
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(0),
         batch_size: 100,
         queue_buffer_size: 1000,
@@ -75,9 +78,11 @@ fn test_concurrent_parser_zero_threads() {
 #[test]
 fn test_concurrent_parser_single_file() {
     let files = create_multiple_test_files(vec![5]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(1),
         batch_size: 10,
         queue_buffer_size: 1000,
@@ -93,9 +98,11 @@ fn test_concurrent_parser_single_file() {
 #[test]
 fn test_concurrent_parser_multiple_files() {
     let files = create_multiple_test_files(vec![3, 4, 2]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(2),
         batch_size: 5,
         queue_buffer_size: 1000,
@@ -111,7 +118,8 @@ fn test_concurrent_parser_multiple_files() {
 #[test]
 fn test_concurrent_parser_empty_files_list() {
     let empty_files: Vec<NamedTempFile> = vec![];
-    let file_paths: Vec<PathBuf> = empty_files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        empty_files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let parser = ConcurrentParser::new(SqllogConfig::default());
     let results = parser.parse_files_concurrent(&file_paths).unwrap();
@@ -123,9 +131,11 @@ fn test_concurrent_parser_empty_files_list() {
 #[test]
 fn test_concurrent_parser_large_batch_size() {
     let files = create_multiple_test_files(vec![20]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(1),
         batch_size: 100,
         queue_buffer_size: 1000,
@@ -141,9 +151,11 @@ fn test_concurrent_parser_large_batch_size() {
 #[test]
 fn test_concurrent_parser_small_batch_size() {
     let files = create_multiple_test_files(vec![10]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(1),
         batch_size: 1,
         queue_buffer_size: 1000,
@@ -159,9 +171,11 @@ fn test_concurrent_parser_small_batch_size() {
 #[test]
 fn test_concurrent_parser_thread_count_exceeds_files() {
     let files = create_multiple_test_files(vec![3, 2]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(10),
         batch_size: 5,
         queue_buffer_size: 1000,
@@ -177,9 +191,11 @@ fn test_concurrent_parser_thread_count_exceeds_files() {
 #[test]
 fn test_concurrent_parser_zero_thread_count_per_file() {
     let files = create_multiple_test_files(vec![2, 3, 1]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(0), // 0 means one thread per file
         batch_size: 5,
         queue_buffer_size: 1000,
@@ -195,7 +211,8 @@ fn test_concurrent_parser_zero_thread_count_per_file() {
 #[test]
 fn test_concurrent_parser_nonexistent_file() {
     let files = create_multiple_test_files(vec![2]);
-    let mut file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let mut file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     // 添加不存在的文件
     file_paths.push(PathBuf::from("nonexistent_file.log"));
@@ -232,9 +249,11 @@ fn test_concurrent_parser_error_resilience() {
 #[test]
 fn test_concurrent_parser_mixed_file_sizes() {
     let files = create_multiple_test_files(vec![1, 15, 5, 10]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
+        errors_out: None,
         thread_count: Some(3),
         batch_size: 7,
         queue_buffer_size: 1000,
@@ -250,12 +269,14 @@ fn test_concurrent_parser_mixed_file_sizes() {
 #[test]
 fn test_concurrent_parser_performance() {
     let files = create_multiple_test_files(vec![50, 30, 40]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
         thread_count: Some(3),
         batch_size: 15,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let start = std::time::Instant::now();
@@ -274,13 +295,15 @@ fn test_concurrent_parser_performance() {
 #[test]
 fn test_concurrent_parser_config_edge_cases() {
     let files = create_multiple_test_files(vec![5]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     // 测试极小的配置值
     let config = SqllogConfig {
         thread_count: Some(1),
         batch_size: 1,
         queue_buffer_size: 1,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -305,12 +328,14 @@ fn test_concurrent_parser_empty_log_file() {
 #[test]
 fn test_concurrent_parser_very_large_file() {
     let files = create_multiple_test_files(vec![200]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
         thread_count: Some(1),
         batch_size: 100,
         queue_buffer_size: 5000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -323,7 +348,8 @@ fn test_concurrent_parser_very_large_file() {
 #[test]
 fn test_concurrent_parser_different_batch_sizes() {
     let files = create_multiple_test_files(vec![20]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     // 测试不同批处理大小
     for batch_size in [5, 10, 50, 100] {
@@ -331,6 +357,7 @@ fn test_concurrent_parser_different_batch_sizes() {
             thread_count: Some(1),
             batch_size,
             queue_buffer_size: 1000,
+            errors_out: None,
         };
 
         let parser = ConcurrentParser::new(config);
@@ -344,12 +371,14 @@ fn test_concurrent_parser_different_batch_sizes() {
 #[test]
 fn test_concurrent_parser_many_small_files() {
     let files = create_multiple_test_files(vec![1, 1, 1, 1, 1, 1, 1, 1]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
         thread_count: Some(4),
         batch_size: 2,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -362,12 +391,14 @@ fn test_concurrent_parser_many_small_files() {
 #[test]
 fn test_concurrent_parser_timing_measurement() {
     let files = create_multiple_test_files(vec![100, 100]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let config = SqllogConfig {
         thread_count: Some(2),
         batch_size: 50,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let start = std::time::Instant::now();
@@ -395,7 +426,8 @@ fn test_concurrent_parser_default_instance() {
 #[test]
 fn test_concurrent_parser_record_validation() {
     let files = create_multiple_test_files(vec![3]);
-    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    let file_paths: Vec<PathBuf> =
+        files.iter().map(|f| f.path().to_path_buf()).collect();
 
     let parser = ConcurrentParser::new(SqllogConfig::default());
     let results = parser.parse_files_concurrent(&file_paths).unwrap();

@@ -288,16 +288,19 @@ fn test_various_config_combinations() {
             batch_size: 1,
             thread_count: Some(1),
             queue_buffer_size: 100,
+            errors_out: None,
         },
         SqllogConfig {
             batch_size: 5,
             thread_count: Some(2),
             queue_buffer_size: 1000,
+            errors_out: None,
         },
         SqllogConfig {
             batch_size: 10,
             thread_count: None,
             queue_buffer_size: 5000,
+            errors_out: None,
         },
     ];
 

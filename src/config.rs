@@ -31,6 +31,8 @@ pub struct SqllogConfig {
     pub batch_size: usize,
     /// 任务队列缓冲大小
     pub queue_buffer_size: usize,
+    /// 解析错误输出路径（JSONL），None 表示使用默认值 parse_errors.jsonl
+    pub errors_out: Option<String>,
 }
 
 impl Default for Config {
@@ -55,6 +57,7 @@ impl Default for SqllogConfig {
             thread_count: Some(0), // 默认为0，表示自动根据文件数量确定
             batch_size: 0,         // 默认为0，表示不分块直接解析整个文件
             queue_buffer_size: 10000,
+            errors_out: None,
         }
     }
 }

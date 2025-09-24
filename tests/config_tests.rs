@@ -177,6 +177,7 @@ queue_buffer_size = 15000
                 thread_count: Some(16),
                 batch_size: 10000,
                 queue_buffer_size: 50000,
+                errors_out: None,
             },
         };
 
@@ -214,9 +215,10 @@ queue_buffer_size = 10000
                 level: "trace".to_string(),
             },
             sqllog: SqllogConfig {
-                thread_count: Some(12),
-                batch_size: 7500,
-                queue_buffer_size: 25000,
+                thread_count: Some(2),
+                batch_size: 10,
+                queue_buffer_size: 2000,
+                errors_out: None,
             },
         };
 

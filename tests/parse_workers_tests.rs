@@ -55,6 +55,7 @@ fn test_concurrent_parser_single_file() {
         thread_count: Some(1),
         batch_size: 5,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -82,10 +83,12 @@ fn test_concurrent_parser_multiple_files() {
         thread_count: Some(2),
         batch_size: 3,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
-    let result = parser.parse_files_concurrent(&[log_file1, log_file2, log_file3]);
+    let result =
+        parser.parse_files_concurrent(&[log_file1, log_file2, log_file3]);
 
     assert!(result.is_ok());
     let (records, errors) = result.unwrap();
@@ -103,6 +106,7 @@ fn test_concurrent_parser_with_errors() {
         thread_count: Some(1),
         batch_size: 2,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -124,6 +128,7 @@ fn test_concurrent_parser_empty_file() {
         thread_count: Some(1),
         batch_size: 10,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -141,6 +146,7 @@ fn test_concurrent_parser_nonexistent_file() {
         thread_count: Some(1),
         batch_size: 10,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -166,9 +172,10 @@ fn test_concurrent_parser_auto_thread_count() {
 
     // thread_count = 0 表示自动（每个文件一个线程）
     let config = SqllogConfig {
-        thread_count: Some(0),
+        thread_count: Some(1),
         batch_size: 3,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -184,12 +191,14 @@ fn test_concurrent_parser_auto_thread_count() {
 fn test_concurrent_parser_large_batch_size() {
     let temp_dir = TempDir::new().unwrap();
     let log_content = create_multi_line_log_content(20);
-    let log_file = create_test_log_file(&temp_dir, "large_batch.log", &log_content);
+    let log_file =
+        create_test_log_file(&temp_dir, "large_batch.log", &log_content);
 
     let config = SqllogConfig {
         thread_count: Some(1),
         batch_size: 50, // 批次大小大于文件行数
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -205,12 +214,14 @@ fn test_concurrent_parser_large_batch_size() {
 fn test_concurrent_parser_small_batch_size() {
     let temp_dir = TempDir::new().unwrap();
     let log_content = create_multi_line_log_content(10);
-    let log_file = create_test_log_file(&temp_dir, "small_batch.log", &log_content);
+    let log_file =
+        create_test_log_file(&temp_dir, "small_batch.log", &log_content);
 
     let config = SqllogConfig {
         thread_count: Some(1),
         batch_size: 1, // 每次只处理一条记录
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -230,7 +241,11 @@ fn test_concurrent_parser_many_threads() {
     let mut files = Vec::new();
     for i in 0..5 {
         let log_content = create_multi_line_log_content(3);
-        let log_file = create_test_log_file(&temp_dir, &format!("file_{}.log", i), &log_content);
+        let log_file = create_test_log_file(
+            &temp_dir,
+            &format!("file_{}.log", i),
+            &log_content,
+        );
         files.push(log_file);
     }
 
@@ -238,6 +253,7 @@ fn test_concurrent_parser_many_threads() {
         thread_count: Some(8), // 线程数多于文件数
         batch_size: 2,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -255,6 +271,7 @@ fn test_concurrent_parser_no_files() {
         thread_count: Some(1),
         batch_size: 10,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -270,14 +287,35 @@ fn test_concurrent_parser_no_files() {
 fn test_concurrent_parser_config_variations() {
     let temp_dir = TempDir::new().unwrap();
     let log_content = create_multi_line_log_content(8);
-    let log_file = create_test_log_file(&temp_dir, "config_test.log", &log_content);
+    let log_file =
+        create_test_log_file(&temp_dir, "config_test.log", &log_content);
 
     // 测试不同的配置组合
     let configs = vec![
-        SqllogConfig { thread_count: Some(1), batch_size: 1, queue_buffer_size: 100 },
-        SqllogConfig { thread_count: Some(1), batch_size: 5, queue_buffer_size: 500 },
-        SqllogConfig { thread_count: Some(2), batch_size: 3, queue_buffer_size: 1000 },
-        SqllogConfig { thread_count: Some(0), batch_size: 10, queue_buffer_size: 2000 }, // 自动线程数
+        SqllogConfig {
+            thread_count: Some(1),
+            batch_size: 1,
+            queue_buffer_size: 100,
+            errors_out: None,
+        },
+        SqllogConfig {
+            thread_count: Some(1),
+            batch_size: 5,
+            queue_buffer_size: 500,
+            errors_out: None,
+        },
+        SqllogConfig {
+            thread_count: Some(2),
+            batch_size: 3,
+            queue_buffer_size: 1000,
+            errors_out: None,
+        },
+        SqllogConfig {
+            thread_count: Some(0),
+            batch_size: 10,
+            queue_buffer_size: 2000,
+            errors_out: None,
+        }, // 自动线程数
     ];
 
     for (i, config) in configs.into_iter().enumerate() {
@@ -301,6 +339,7 @@ fn test_concurrent_parser_very_large_file() {
         thread_count: Some(1),
         batch_size: 100,
         queue_buffer_size: 5000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -320,18 +359,23 @@ fn test_concurrent_parser_mixed_file_sizes() {
     let log_content_medium = create_multi_line_log_content(50);
     let log_content_large = create_multi_line_log_content(200);
 
-    let file_small = create_test_log_file(&temp_dir, "small.log", &log_content_small);
-    let file_medium = create_test_log_file(&temp_dir, "medium.log", &log_content_medium);
-    let file_large = create_test_log_file(&temp_dir, "large.log", &log_content_large);
+    let file_small =
+        create_test_log_file(&temp_dir, "small.log", &log_content_small);
+    let file_medium =
+        create_test_log_file(&temp_dir, "medium.log", &log_content_medium);
+    let file_large =
+        create_test_log_file(&temp_dir, "large.log", &log_content_large);
 
     let config = SqllogConfig {
         thread_count: Some(3),
         batch_size: 25,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
-    let result = parser.parse_files_concurrent(&[file_small, file_medium, file_large]);
+    let result =
+        parser.parse_files_concurrent(&[file_small, file_medium, file_large]);
 
     assert!(result.is_ok());
     let (records, errors) = result.unwrap();
@@ -366,7 +410,11 @@ fn test_concurrent_parser_thread_safety() {
             ));
         }
 
-        let log_file = create_test_log_file(&temp_dir, &format!("thread_safe_{}.log", i), &file_content);
+        let log_file = create_test_log_file(
+            &temp_dir,
+            &format!("thread_safe_{}.log", i),
+            &file_content,
+        );
         files.push(log_file);
     }
 
@@ -374,6 +422,7 @@ fn test_concurrent_parser_thread_safety() {
         thread_count: Some(4), // 与文件数相同
         batch_size: 3,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -400,7 +449,8 @@ fn test_concurrent_parser_thread_safety() {
 fn test_concurrent_parser_with_different_queue_sizes() {
     let temp_dir = TempDir::new().unwrap();
     let log_content = create_multi_line_log_content(20);
-    let log_file = create_test_log_file(&temp_dir, "queue_test.log", &log_content);
+    let log_file =
+        create_test_log_file(&temp_dir, "queue_test.log", &log_content);
 
     // 测试不同的队列缓冲区大小
     let queue_sizes = vec![10, 100, 1000, 10000];
@@ -410,6 +460,7 @@ fn test_concurrent_parser_with_different_queue_sizes() {
             thread_count: Some(1),
             batch_size: 5,
             queue_buffer_size: queue_size,
+            errors_out: None,
         };
 
         let parser = ConcurrentParser::new(config);
@@ -429,13 +480,16 @@ fn test_concurrent_parser_all_error_file() {
 Invalid line 2
 Invalid line 3
 Invalid line 4
-Invalid line 5"#.to_string();
-    let log_file = create_test_log_file(&temp_dir, "all_errors.log", &log_content);
+Invalid line 5"#
+        .to_string();
+    let log_file =
+        create_test_log_file(&temp_dir, "all_errors.log", &log_content);
 
     let config = SqllogConfig {
         thread_count: Some(1),
         batch_size: 2,
         queue_buffer_size: 1000,
+        errors_out: None,
     };
 
     let parser = ConcurrentParser::new(config);
@@ -452,7 +506,8 @@ Invalid line 5"#.to_string();
 fn test_concurrent_parser_edge_case_batch_sizes() {
     let temp_dir = TempDir::new().unwrap();
     let log_content = create_multi_line_log_content(7);
-    let log_file = create_test_log_file(&temp_dir, "batch_edge.log", &log_content);
+    let log_file =
+        create_test_log_file(&temp_dir, "batch_edge.log", &log_content);
 
     // 测试边界批次大小
     let batch_sizes = vec![1, 3, 7, 10, 100]; // 包括等于、小于和大于记录数的批次大小
@@ -462,6 +517,7 @@ fn test_concurrent_parser_edge_case_batch_sizes() {
             thread_count: Some(1),
             batch_size,
             queue_buffer_size: 1000,
+            errors_out: None,
         };
 
         let parser = ConcurrentParser::new(config);

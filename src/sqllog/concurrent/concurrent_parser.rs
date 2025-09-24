@@ -19,6 +19,8 @@ pub struct ConcurrentParser {
     pub thread_count: usize,
     /// 批处理大小
     pub batch_size: usize,
+    /// 可选的错误输出路径（JSONL）
+    pub errors_out: Option<String>,
 }
 
 impl ConcurrentParser {
@@ -30,6 +32,7 @@ impl ConcurrentParser {
         Self {
             thread_count: config.thread_count.unwrap_or(0),
             batch_size: config.batch_size,
+            errors_out: config.errors_out.clone(),
         }
     }
 
@@ -53,6 +56,7 @@ impl ConcurrentParser {
             exporter,
             self.batch_size,
             self.thread_count,
+            self.errors_out.clone(),
         )
     }
 
@@ -68,6 +72,7 @@ impl ConcurrentParser {
             file_paths,
             self.batch_size,
             self.thread_count,
+            self.errors_out.clone(),
         )
     }
 }

@@ -100,6 +100,7 @@ mod sync_parser_error_tests {
             thread_count: Some(1),
             batch_size: 0, // 这应该触发整个文件一次性处理的路径
             queue_buffer_size: 1000,
+            errors_out: None,
         };
 
         create_parser_and_test_file(content, config, |parser, file_path| {
@@ -135,6 +136,7 @@ mod sync_parser_error_tests {
             thread_count: Some(1),
             batch_size: 2, // 每次只处理2行
             queue_buffer_size: 1000,
+            errors_out: None,
         };
 
         create_parser_and_test_file(&content, config, |parser, file_path| {
@@ -249,6 +251,7 @@ mod sync_parser_error_tests {
             thread_count: Some(1),
             batch_size: 10000, // 远大于文件行数
             queue_buffer_size: 1000,
+            errors_out: None,
         };
 
         create_parser_and_test_file(content, config, |parser, file_path| {

@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::sqllog::{parser::SqllogParser, types::Sqllog};
+use serde::Serialize;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -16,7 +17,7 @@ pub struct ParseResult {
 }
 
 /// 解析错误信息
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ParseError {
     /// 行号
     pub line: usize,

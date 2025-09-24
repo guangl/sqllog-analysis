@@ -37,6 +37,9 @@ struct Cli {
     /// 线程数量 (0 表示自动)
     #[arg(short, long, default_value = "0")]
     threads: usize,
+    /// 错误输出路径（JSONL），若指定会覆盖环境变量 SQLOG_ERRORS_OUT
+    #[arg(short = 'e', long, value_name = "ERRORS_OUT")]
+    errors_out: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -80,22 +83,19 @@ enum ExportFormat {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // 初始化日志系统
+    // 初始化日志系统（不再依赖环境变量）
     #[cfg(feature = "logging")]
     {
         let log_level = if cli.verbose { "trace" } else { "debug" };
-        // 如果没有设置 RUST_LOG 环境变量，就使用我们的默认级别
-        if std::env::var("RUST_LOG").is_err() {
-            unsafe {
-                std::env::set_var("RUST_LOG", log_level);
-            }
-        }
-
         tracing_subscriber::fmt()
-            .with_env_filter(
-                std::env::var("RUST_LOG")
-                    .unwrap_or_else(|_| log_level.to_string()),
-            )
+            .with_max_level(match log_level {
+                "trace" => tracing::Level::TRACE,
+                "debug" => tracing::Level::DEBUG,
+                "info" => tracing::Level::INFO,
+                "warn" => tracing::Level::WARN,
+                "error" => tracing::Level::ERROR,
+                _ => tracing::Level::INFO,
+            })
             .init();
         tracing::info!("SQL日志分析工具启动");
     }
@@ -105,6 +105,11 @@ fn main() -> Result<()> {
     config.batch_size = cli.batch_size;
     if cli.threads > 0 {
         config.thread_count = Some(cli.threads);
+    }
+
+    // 将命令行提供的错误输出路径写入配置（不使用环境变量）
+    if let Some(path) = cli.errors_out.as_ref() {
+        config.errors_out = Some(path.clone());
     }
 
     match cli.command {

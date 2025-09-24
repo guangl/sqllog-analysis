@@ -83,7 +83,7 @@ mod advanced_parse_worker_tests {
 
     #[test]
     fn test_parse_files_concurrent_empty_file_list() {
-        let result = parse_files_concurrent(&[], 10, 2);
+        let result = parse_files_concurrent(&[], 10, 2, None);
         assert!(result.is_ok());
         let (records, errors) = result.unwrap();
         assert_eq!(records.len(), 0);
@@ -100,7 +100,7 @@ mod advanced_parse_worker_tests {
         let file2 = create_test_log_file(&temp_dir, "file2.log", &log_content2);
 
         // thread_count=0 表示每文件一个线程
-        let result = parse_files_concurrent(&[file1, file2], 5, 0);
+        let result = parse_files_concurrent(&[file1, file2], 5, 0, None);
         assert!(result.is_ok());
         let (records, errors) = result.unwrap();
         assert_eq!(records.len(), 5); // 3 + 2
@@ -114,7 +114,7 @@ mod advanced_parse_worker_tests {
         let file = create_test_log_file(&temp_dir, "single.log", &log_content);
 
         // 10个线程但只有1个文件
-        let result = parse_files_concurrent(&[file], 3, 10);
+        let result = parse_files_concurrent(&[file], 3, 10, None);
         assert!(result.is_ok());
         let (records, errors) = result.unwrap();
         assert_eq!(records.len(), 5);
@@ -130,7 +130,7 @@ mod advanced_parse_worker_tests {
         let nonexistent_file = temp_dir.path().join("nonexistent.log");
 
         let result =
-            parse_files_concurrent(&[valid_file, nonexistent_file], 5, 2);
+            parse_files_concurrent(&[valid_file, nonexistent_file], 5, 2, None);
         assert!(result.is_ok());
         let (records, _errors) = result.unwrap();
         // 应该只解析到有效文件的记录
@@ -144,7 +144,7 @@ mod advanced_parse_worker_tests {
         let mixed_file =
             create_test_log_file(&temp_dir, "mixed.log", &mixed_content);
 
-        let result = parse_files_concurrent(&[mixed_file], 2, 1);
+        let result = parse_files_concurrent(&[mixed_file], 2, 1, None);
         assert!(result.is_ok());
         let (records, _errors) = result.unwrap();
         // 应该解析出有效的记录
@@ -159,7 +159,7 @@ mod advanced_parse_worker_tests {
             create_test_log_file(&temp_dir, "large_batch.log", &log_content);
 
         // 批次大小大于记录数
-        let result = parse_files_concurrent(&[file], 100, 1);
+        let result = parse_files_concurrent(&[file], 100, 1, None);
         assert!(result.is_ok());
         let (records, errors) = result.unwrap();
         assert_eq!(records.len(), 10);
@@ -174,7 +174,7 @@ mod advanced_parse_worker_tests {
             create_test_log_file(&temp_dir, "small_batch.log", &log_content);
 
         // 非常小的批次大小
-        let result = parse_files_concurrent(&[file], 1, 1);
+        let result = parse_files_concurrent(&[file], 1, 1, None);
         assert!(result.is_ok());
         let (records, errors) = result.unwrap();
         assert_eq!(records.len(), 7);
@@ -202,7 +202,7 @@ mod advanced_parse_worker_tests {
         }
 
         // 使用较少的线程处理多个文件
-        let result = parse_files_concurrent(&files, 3, 2);
+        let result = parse_files_concurrent(&files, 3, 2, None);
         assert!(result.is_ok());
         let (records, errors) = result.unwrap();
         assert_eq!(records.len(), expected_total);
@@ -225,7 +225,7 @@ mod advanced_parse_worker_tests {
             files.push(file);
         }
 
-        let result = parse_files_concurrent(&files, 5, 5);
+        let result = parse_files_concurrent(&files, 5, 5, None);
         assert!(result.is_ok());
         let (records, errors) = result.unwrap();
         assert_eq!(records.len(), 50); // 5 files × 10 records
@@ -264,7 +264,7 @@ mod advanced_parse_worker_tests {
         }
 
         // 使用适中数量的线程
-        let result = parse_files_concurrent(&files, 4, 3);
+        let result = parse_files_concurrent(&files, 4, 3, None);
         assert!(result.is_ok());
         let (records, errors) = result.unwrap();
         assert_eq!(records.len(), expected_total);
@@ -286,7 +286,8 @@ mod advanced_parse_worker_tests {
         let valid_file =
             create_test_log_file(&temp_dir, "valid.log", &valid_content);
 
-        let result = parse_files_concurrent(&[invalid_file, valid_file], 2, 2);
+        let result =
+            parse_files_concurrent(&[invalid_file, valid_file], 2, 2, None);
         assert!(result.is_ok());
         let (records, _errors) = result.unwrap();
         // 应该至少解析出有效文件的记录

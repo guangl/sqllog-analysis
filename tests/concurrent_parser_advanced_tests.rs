@@ -92,7 +92,7 @@ mod advanced_concurrent_parser_tests {
 
     #[test]
     fn test_concurrent_parser_new_with_none_thread_count() {
-        let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
             thread_count: None, // None 应该转换为 0
             batch_size: 100,
             queue_buffer_size: 1000,
@@ -105,7 +105,7 @@ mod advanced_concurrent_parser_tests {
 
     #[test]
     fn test_concurrent_parser_new_with_some_thread_count() {
-        let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
             thread_count: Some(8),
             batch_size: 250,
             queue_buffer_size: 2000,
@@ -119,7 +119,7 @@ mod advanced_concurrent_parser_tests {
     #[test]
     fn test_concurrent_parser_new_extreme_config_values() {
         // 测试极端配置值
-        let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
             thread_count: Some(0), // 最小值
             batch_size: 1,         // 最小批次
             queue_buffer_size: 1,  // 最小队列
@@ -129,7 +129,7 @@ mod advanced_concurrent_parser_tests {
         assert_eq!(parser.thread_count, 0);
         assert_eq!(parser.batch_size, 1);
 
-        let config2 = SqllogConfig {
+    let config2 = SqllogConfig { errors_out: None,
             thread_count: Some(1000),  // 很大的值
             batch_size: 10000,         // 很大的批次
             queue_buffer_size: 100000, // 很大的队列
@@ -154,7 +154,7 @@ mod advanced_concurrent_parser_tests {
 
     #[test]
     fn test_concurrent_parser_clone() {
-        let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
             thread_count: Some(4),
             batch_size: 150,
             queue_buffer_size: 3000,
@@ -173,6 +173,7 @@ mod advanced_concurrent_parser_tests {
             thread_count: Some(2),
             batch_size: 50,
             queue_buffer_size: 1000,
+            errors_out: None,
         });
 
         let debug_str = format!("{:?}", parser);
@@ -194,6 +195,7 @@ mod advanced_concurrent_parser_tests {
             thread_count: Some(2),
             batch_size: 5,
             queue_buffer_size: 1000,
+            errors_out: None,
         });
 
         let result = parser.parse_files_concurrent(&[complex_file]);
@@ -233,6 +235,7 @@ mod advanced_concurrent_parser_tests {
             thread_count: Some(1),
             batch_size: 3,
             queue_buffer_size: 1000,
+            errors_out: None,
         });
 
         let result = parser.parse_files_concurrent(&[mixed_file]);
@@ -265,6 +268,7 @@ mod advanced_concurrent_parser_tests {
             thread_count: Some(1),
             batch_size: 0, // 零批次大小
             queue_buffer_size: 1000,
+            errors_out: None,
         });
 
         let result = parser.parse_files_concurrent(&[log_file]);
@@ -295,6 +299,7 @@ mod advanced_concurrent_parser_tests {
             thread_count: Some(2),
             batch_size: 4,
             queue_buffer_size: 1000,
+            errors_out: None,
         });
 
         let result = parser.parse_files_concurrent(&[file1, file2_path]);
@@ -320,9 +325,10 @@ mod advanced_concurrent_parser_tests {
             create_test_log_file(&temp_dir, "unicode.log", &unicode_content);
 
         let parser = ConcurrentParser::new(SqllogConfig {
-            thread_count: Some(1),
-            batch_size: 2,
-            queue_buffer_size: 1000,
+            thread_count: Some(2),
+            batch_size: 100,
+            queue_buffer_size: 5000,
+            errors_out: None,
         });
 
         let result = parser.parse_files_concurrent(&[unicode_file]);
@@ -353,6 +359,7 @@ mod advanced_concurrent_parser_tests {
             thread_count: Some(2),
             batch_size: 100,
             queue_buffer_size: 5000,
+            errors_out: None,
         });
 
         let start_time = std::time::Instant::now();
@@ -392,6 +399,7 @@ mod advanced_concurrent_parser_tests {
             thread_count: Some(8),
             batch_size: 3,
             queue_buffer_size: 1000,
+            errors_out: None,
         });
 
         let result = parser.parse_files_concurrent(&files);
@@ -412,7 +420,7 @@ mod advanced_concurrent_parser_tests {
         let thread_counts = vec![0, 1, 2, 4, 8];
 
         for thread_count in thread_counts {
-            let parser = ConcurrentParser::new(SqllogConfig {
+            let parser = ConcurrentParser::new(SqllogConfig { errors_out: None,
                 thread_count: Some(thread_count),
                 batch_size: 10,
                 queue_buffer_size: 1000,
@@ -579,7 +587,7 @@ mod advanced_concurrent_parser_tests {
             let exported_records = exporter.exported_records.clone();
             let finalize_called = exporter.finalize_called.clone();
 
-            let parser = ConcurrentParser::new(SqllogConfig {
+            let parser = ConcurrentParser::new(SqllogConfig { errors_out: None,
                 thread_count: Some(1),
                 batch_size: 3,
                 queue_buffer_size: 1000,
@@ -625,7 +633,7 @@ mod advanced_concurrent_parser_tests {
             let exported_records = exporter.exported_records.clone();
             let batch_count = exporter.batch_count.clone();
 
-            let parser = ConcurrentParser::new(SqllogConfig {
+            let parser = ConcurrentParser::new(SqllogConfig { errors_out: None,
                 thread_count: Some(2),
                 batch_size: 4,
                 queue_buffer_size: 1000,
@@ -661,7 +669,7 @@ mod advanced_concurrent_parser_tests {
             let exported_records = exporter.exported_records.clone();
             let batch_count = exporter.batch_count.clone();
 
-            let parser = ConcurrentParser::new(SqllogConfig {
+            let parser = ConcurrentParser::new(SqllogConfig { errors_out: None,
                 thread_count: Some(1),
                 batch_size: 2, // 3个批次
                 queue_buffer_size: 1000,
@@ -695,7 +703,7 @@ mod advanced_concurrent_parser_tests {
             let exporter = AdvancedStreamingExporter::new("streaming_fail")
                 .with_failure_on_batch(2); // 第二个批次失败
 
-            let parser = ConcurrentParser::new(SqllogConfig {
+            let parser = ConcurrentParser::new(SqllogConfig { errors_out: None,
                 thread_count: Some(1),
                 batch_size: 3,
                 queue_buffer_size: 1000,
@@ -740,7 +748,7 @@ mod advanced_concurrent_parser_tests {
             let exporter = AdvancedStreamingExporter::new("streaming_auto");
             let exported_records = exporter.exported_records.clone();
 
-            let parser = ConcurrentParser::new(SqllogConfig {
+            let parser = ConcurrentParser::new(SqllogConfig { errors_out: None,
                 thread_count: Some(0), // 自动线程数
                 batch_size: 2,
                 queue_buffer_size: 1000,

@@ -12,7 +12,7 @@ fn test_default_config() {
 /// 测试配置结构体的创建
 #[test]
 fn test_config_creation() {
-    let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
         batch_size: 500,
         thread_count: Some(4),
         queue_buffer_size: 5000,
@@ -26,7 +26,7 @@ fn test_config_creation() {
 /// 测试配置参数边界值
 #[test]
 fn test_config_boundary_values() {
-    let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
         batch_size: 1,
         thread_count: Some(1),
         queue_buffer_size: 1,
@@ -40,7 +40,7 @@ fn test_config_boundary_values() {
 /// 测试大批次大小配置
 #[test]
 fn test_large_batch_size() {
-    let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
         batch_size: 10000,
         thread_count: Some(16),
         queue_buffer_size: 100000,
@@ -54,7 +54,7 @@ fn test_large_batch_size() {
 /// 测试无线程数配置（自动检测）
 #[test]
 fn test_auto_thread_detection() {
-    let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
         batch_size: 1000,
         thread_count: None, // 应该自动检测
         queue_buffer_size: 10000,
@@ -66,7 +66,7 @@ fn test_auto_thread_detection() {
 /// 测试配置克隆
 #[test]
 fn test_config_clone() {
-    let original = SqllogConfig {
+    let original = SqllogConfig { errors_out: None,
         batch_size: 2000,
         thread_count: Some(8),
         queue_buffer_size: 20000,
@@ -82,7 +82,7 @@ fn test_config_clone() {
 /// 测试配置调试输出
 #[test]
 fn test_config_debug_output() {
-    let config = SqllogConfig {
+    let config = SqllogConfig { errors_out: None,
         batch_size: 1500,
         thread_count: Some(6),
         queue_buffer_size: 15000,
@@ -97,19 +97,19 @@ fn test_config_debug_output() {
 /// 测试配置字段比较
 #[test]
 fn test_config_field_comparison() {
-    let config1 = SqllogConfig {
+    let config1 = SqllogConfig { errors_out: None,
         batch_size: 1000,
         thread_count: Some(4),
         queue_buffer_size: 10000,
     };
 
-    let config2 = SqllogConfig {
+    let config2 = SqllogConfig { errors_out: None,
         batch_size: 1000,
         thread_count: Some(4),
         queue_buffer_size: 10000,
     };
 
-    let config3 = SqllogConfig {
+    let config3 = SqllogConfig { errors_out: None,
         batch_size: 2000,
         thread_count: Some(4),
         queue_buffer_size: 10000,
@@ -127,22 +127,22 @@ fn test_config_field_comparison() {
 #[test]
 fn test_config_combinations() {
     let configs = vec![
-        SqllogConfig {
+        SqllogConfig { errors_out: None,
             batch_size: 100,
             thread_count: Some(1),
             queue_buffer_size: 1000,
         },
-        SqllogConfig {
+        SqllogConfig { errors_out: None,
             batch_size: 500,
             thread_count: Some(2),
             queue_buffer_size: 5000,
         },
-        SqllogConfig {
+        SqllogConfig { errors_out: None,
             batch_size: 1000,
             thread_count: None,
             queue_buffer_size: 10000,
         },
-        SqllogConfig {
+        SqllogConfig { errors_out: None,
             batch_size: 5000,
             thread_count: Some(16),
             queue_buffer_size: 50000,
@@ -338,7 +338,7 @@ fn test_config_save_to_file() {
             log_dir: "test_save_logs".to_string(),
             level: "error".to_string(),
         },
-        sqllog: SqllogConfig {
+        sqllog: SqllogConfig { errors_out: None,
             thread_count: Some(10),
             batch_size: 300,
             queue_buffer_size: 8000,
