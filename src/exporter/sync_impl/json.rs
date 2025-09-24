@@ -132,3 +132,115 @@ impl SyncExporter for SyncJsonExporter {
         self.stats.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+    use std::io::Read;
+
+    #[test]
+    fn test_json_first_and_comma() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncJsonExporter::new(path).unwrap();
+
+        let r1 = Sqllog { occurrence_time: "t1".into(), ep: "e".into(), ..Default::default() };
+        let r2 = Sqllog { occurrence_time: "t2".into(), ep: "e".into(), ..Default::default() };
+
+        exporter.insert_records(&[r1.clone()]).unwrap();
+        exporter.insert_records(&[r2.clone()]).unwrap();
+        exporter.finalize().unwrap();
+
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        assert!(s.starts_with("[\n"));
+        assert!(s.contains(",\n  {"));
+        assert!(s.contains("\n]\n"));
+    }
+
+    #[test]
+    fn test_json_export_record_and_finalize() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncJsonExporter::new(path).unwrap();
+
+        let r1 = Sqllog { occurrence_time: "t1".into(), ep: "e".into(), ..Default::default() };
+        let r2 = Sqllog { occurrence_time: "t2".into(), ep: "e".into(), ..Default::default() };
+
+        exporter.export_record(&r1).unwrap();
+        exporter.export_record(&r2).unwrap();
+        exporter.finalize().unwrap();
+
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        assert!(s.contains("t1"));
+        assert!(s.contains("t2"));
+    }
+
+    #[test]
+    fn test_record_to_json_and_indentation() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncJsonExporter::new(path).unwrap();
+
+        let r = Sqllog {
+            occurrence_time: "tjson".into(),
+            ep: "ejson".into(),
+            description: "djson".into(),
+            ..Default::default()
+        };
+
+        // test internal conversion
+        let js = exporter.record_to_json(&r).unwrap();
+        assert!(js.contains("tjson"));
+        assert!(js.contains("ejson"));
+
+        // test insert_records writes indentation
+        exporter.insert_records(&[r.clone()]).unwrap();
+        exporter.finalize().unwrap();
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        assert!(s.contains("  {"));
+    }
+
+    #[test]
+    fn test_export_batch_writes_multiple_records() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncJsonExporter::new(path).unwrap();
+
+        let r1 = Sqllog { occurrence_time: "a".into(), ep: "e".into(), ..Default::default() };
+        let r2 = Sqllog { occurrence_time: "b".into(), ep: "e".into(), ..Default::default() };
+
+        exporter.export_batch(&[r1, r2]).unwrap();
+        exporter.finalize().unwrap();
+
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        assert!(s.contains("[\n"));
+        assert!(s.contains("a"));
+        assert!(s.contains("b"));
+    }
+
+    #[test]
+    fn test_insert_records_empty_noop() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncJsonExporter::new(path).unwrap();
+        // insert empty slice should be a no-op
+        exporter.insert_records(&[]).unwrap();
+        exporter.finalize().unwrap();
+
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        // should still have JSON array delimiters
+        assert!(s.starts_with("[\n"));
+        assert!(s.ends_with("\n]\n"));
+    }
+}

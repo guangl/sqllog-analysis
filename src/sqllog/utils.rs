@@ -179,3 +179,41 @@ pub fn line_bytes_to_str_impl<'a>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::SqllogError;
+
+    #[test]
+    fn test_find_first_row_pos_basic() {
+        let s = "garbage\n2025-09-16 20:02:53.562 (EP[0] sess:0x1 thrd:1 user:U trxid:1 stmt:0x1) Test";
+        let pos = find_first_row_pos(s);
+        assert!(pos.is_some());
+        let idx = pos.unwrap();
+        assert!(s[idx..].starts_with("2025-09-16"));
+    }
+
+    #[test]
+    fn test_line_bytes_to_str_impl_invalid_utf8_and_resync() {
+        // Compose bytes with an invalid UTF-8 prefix followed by a valid first-row timestamp
+        let mut bytes = vec![0xff, 0xfe, 0xfe, b' '];
+        bytes.extend_from_slice(b"2025-09-16 20:02:53.562 (EP[0] sess:0x1) Test line\n");
+
+        let mut errors = Vec::new();
+        let cow = line_bytes_to_str_impl(&bytes, 1, &mut errors);
+
+        // Should produce an owned string (lossy) and record an error
+        match cow {
+            Cow::Owned(s) => {
+                // Should start with the timestamp after resync (i.e. prefix drained)
+                assert!(s.starts_with("2025-09-16") || s.contains("2025-09-16"));
+            }
+            Cow::Borrowed(_) => panic!("expected owned string for invalid utf8"),
+        }
+
+        assert!(!errors.is_empty(), "expected errors to be recorded for invalid utf8");
+        // error kind should be Utf8
+        assert!(matches!(errors[0].2, SqllogError::Utf8(_)));
+    }
+}

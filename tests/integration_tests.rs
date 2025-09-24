@@ -108,7 +108,7 @@ fn test_multiple_exporters() {
     assert!(common::verify_output_file_exists(&json_file), "JSON 文件应该存在");
 
     let csv_content = fs::read_to_string(&csv_file).expect("读取 CSV 应该成功");
-    let json_content =
+    let _json_content =
         fs::read_to_string(&json_file).expect("读取 JSON 应该成功");
 
     assert!(csv_content.contains("occurrence_time"), "CSV 应该包含表头");

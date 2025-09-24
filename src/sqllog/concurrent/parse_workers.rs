@@ -523,3 +523,221 @@ pub fn parse_files_concurrent(
 
     Ok((final_records, final_errors))
 }
+
+#[cfg(test)]
+#[cfg(any(
+    feature = "exporter-csv",
+    feature = "exporter-json",
+    feature = "exporter-sqlite",
+    feature = "exporter-duckdb"
+))]
+mod tests {
+    use super::*;
+    use crate::error::SqllogError;
+    use crate::exporter::sync_impl::SyncExporter;
+    use crate::sqllog::types::Sqllog;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    struct DummyExporter {
+        fail_on_export: bool,
+    }
+
+    impl DummyExporter {
+        fn new(fail: bool) -> Self {
+            Self { fail_on_export: fail }
+        }
+    }
+
+    impl SyncExporter for DummyExporter {
+        fn name(&self) -> &str {
+            "DUMMY"
+        }
+
+        fn export_record(
+            &mut self,
+            _record: &Sqllog,
+        ) -> crate::error::Result<()> {
+            if self.fail_on_export {
+                Err(SqllogError::other("export fail"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn export_batch(
+            &mut self,
+            records: &[Sqllog],
+        ) -> crate::error::Result<()> {
+            if self.fail_on_export {
+                Err(SqllogError::other(format!(
+                    "batch fail size {}",
+                    records.len()
+                )))
+            } else {
+                // exercise default behavior by delegating to export_record
+                for r in records {
+                    self.export_record(r)?;
+                }
+                Ok(())
+            }
+        }
+
+        fn finalize(&mut self) -> crate::error::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn write_temp_file(content: &str) -> (TempDir, PathBuf) {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("test.log");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        f.flush().unwrap();
+        (temp_dir, path)
+    }
+
+    #[test]
+    fn test_parse_and_export_concurrent_empty_files() {
+        let exporter = DummyExporter::new(false);
+        let res =
+            parse_and_export_concurrent::<DummyExporter>(&[], exporter, 10, 2)
+                .unwrap();
+        assert_eq!(res.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_and_export_concurrent_exporter_error() {
+        let content = r#"2025-09-16 20:02:53.562 (EP[0] sess:0x1 thrd:1 user:U trxid:1 stmt:0x1) Test query"#;
+        let (_d, path) = write_temp_file(content);
+
+        let exporter = DummyExporter::new(true);
+        let res = parse_and_export_concurrent(&[path], exporter, 10, 1);
+        assert!(res.is_err(), "expected exporter error to surface");
+    }
+
+    #[test]
+    fn test_parse_files_concurrent_basic() {
+        let content = r#"Invalid line
+2025-09-16 20:02:53.562 (EP[0] sess:0x1 thrd:1 user:U trxid:1 stmt:0x1) Valid query
+Another bad line"#;
+        let (_d, path) = write_temp_file(content);
+
+        let (records, errors) = parse_files_concurrent(&[path], 10, 1).unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(errors.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_and_export_concurrent_finalize_error() {
+        // exporter that fails at finalize
+        struct FinalizeFailExporter;
+        impl SyncExporter for FinalizeFailExporter {
+            fn name(&self) -> &str {
+                "FINALIZE_FAIL"
+            }
+            fn export_record(
+                &mut self,
+                _record: &Sqllog,
+            ) -> crate::error::Result<()> {
+                Ok(())
+            }
+            fn export_batch(
+                &mut self,
+                _records: &[Sqllog],
+            ) -> crate::error::Result<()> {
+                Ok(())
+            }
+            fn finalize(&mut self) -> crate::error::Result<()> {
+                Err(SqllogError::other("finalize fail"))
+            }
+        }
+
+        let content = r#"2025-09-16 20:02:53.562 (EP[0] sess:0x1 thrd:1 user:U trxid:1 stmt:0x1) Test query"#;
+        let (_d, path) = write_temp_file(content);
+
+        let exporter = FinalizeFailExporter;
+        let res = parse_and_export_concurrent(&[path], exporter, 10, 1);
+        assert!(res.is_err(), "expected finalize error to surface");
+    }
+
+    #[test]
+    fn test_parse_and_export_concurrent_all_invalid_no_batches() {
+        // file with only invalid lines should not send any batches to exporter
+        let content = "Invalid line 1\nAnother bad line\nYet another invalid";
+        let (_d, path) = write_temp_file(content);
+
+        let exporter = DummyExporter::new(false);
+        let res =
+            parse_and_export_concurrent(&[path], exporter, 10, 1).unwrap();
+        // one file processed
+        assert_eq!(res.len(), 1);
+        // no records parsed
+        assert_eq!(res[0].0, 0);
+        // there should be some parse errors
+        assert!(res[0].1 > 0);
+    }
+
+    #[test]
+    fn test_parse_and_export_concurrent_export_thread_panics() {
+        // exporter that panics during export_batch to simulate an export thread panic
+        struct PanicExporter;
+        impl SyncExporter for PanicExporter {
+            fn name(&self) -> &str {
+                "PANIC"
+            }
+
+            fn export_record(
+                &mut self,
+                _record: &Sqllog,
+            ) -> crate::error::Result<()> {
+                Ok(())
+            }
+
+            fn export_batch(
+                &mut self,
+                _records: &[Sqllog],
+            ) -> crate::error::Result<()> {
+                panic!("simulated panic in export_batch");
+            }
+
+            fn finalize(&mut self) -> crate::error::Result<()> {
+                Ok(())
+            }
+        }
+
+        let content = r#"2025-09-16 20:02:53.562 (EP[0] sess:0x1 thrd:1 user:U trxid:1 stmt:0x1) Test query"#;
+        let (_d, path) = write_temp_file(content);
+
+        let exporter = PanicExporter;
+        let res = parse_and_export_concurrent(&[path], exporter, 10, 1);
+
+        // export thread panicked -> parse_and_export_concurrent should return an error
+        assert!(res.is_err(), "expected error when export thread panics");
+    }
+
+    #[test]
+    fn test_parse_files_concurrent_empty_input() {
+        // empty file list should return empty records and errors
+        let (records, errors) = parse_files_concurrent(&[], 10, 1).unwrap();
+        assert!(records.is_empty());
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_parse_files_concurrent_thread_count_zero() {
+        // thread_count == 0 should create one thread per file
+        let content1 = r#"2025-09-16 20:02:53.562 (EP[0] sess:0x1 thrd:1 user:U trxid:1 stmt:0x1) Valid line"#;
+        let content2 = "Invalid line\nAnother bad";
+        let (_d1, p1) = write_temp_file(content1);
+        let (_d2, p2) = write_temp_file(content2);
+
+        let (records, errors) =
+            parse_files_concurrent(&[p1, p2], 10, 0).unwrap();
+
+        // one valid record from first file, at least one parse error from second
+        assert_eq!(records.len(), 1);
+        assert!(errors.len() >= 1);
+    }
+}

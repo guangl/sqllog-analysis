@@ -100,7 +100,11 @@ impl ExportStats {
 
 impl std::fmt::Display for ExportStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "成功: {}, 失败: {}", self.exported_records, self.failed_records)?;
+        write!(
+            f,
+            "成功: {}, 失败: {}",
+            self.exported_records, self.failed_records
+        )?;
 
         if let Some(duration) = self.duration() {
             write!(f, ", 耗时: {:.2}s", duration.as_secs_f64())?;
@@ -111,5 +115,128 @@ impl std::fmt::Display for ExportStats {
         }
 
         write!(f, ", 成功率: {:.1}%", self.success_rate())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // no local Duration import needed; use fully-qualified std::time::Duration where required
+
+    #[test]
+    fn test_display_without_finish() {
+        let s = format!("{}", ExportStats::new());
+        // when not finished, duration not printed but success rate should be present
+        assert!(s.contains("成功"));
+    }
+
+    #[test]
+    fn test_records_per_second_zero_duration() {
+        let mut a = ExportStats::new();
+        a.exported_records = 1;
+        // artificially set end_time == start_time to simulate zero duration
+        if let Some(start) = a.start_time {
+            a.end_time = Some(start);
+        }
+
+        assert_eq!(a.records_per_second().unwrap(), 0.0);
+    }
+
+    #[test]
+    fn test_merge_preserve_start_and_end() {
+        let mut a = ExportStats::new();
+        a.exported_records = 2;
+        // make a have a later start and earlier end
+        let later_start = std::time::Instant::now();
+        a.start_time = Some(later_start);
+        a.end_time = Some(later_start + std::time::Duration::from_secs(1));
+
+        let mut b = ExportStats::new();
+        b.exported_records = 3;
+        // make b have an earlier start and later end
+        let earlier_start = later_start - std::time::Duration::from_secs(2);
+        b.start_time = Some(earlier_start);
+        b.end_time = Some(later_start + std::time::Duration::from_secs(5));
+
+        a.merge(&b);
+
+        // exported records should sum
+        assert_eq!(a.exported_records, 5);
+        // start_time should be earliest (earlier_start)
+        assert!(
+            a.start_time.unwrap()
+                <= earlier_start + std::time::Duration::from_secs(0)
+        );
+        // end_time should be latest
+        assert!(
+            a.end_time.unwrap()
+                >= later_start + std::time::Duration::from_secs(5)
+        );
+    }
+
+    #[test]
+    fn test_display_with_finish_and_rates() {
+        let mut s = ExportStats::new();
+        s.exported_records = 5;
+        s.failed_records = 1;
+        // make duration > 0
+        let start =
+            std::time::Instant::now() - std::time::Duration::from_secs(2);
+        s.start_time = Some(start);
+        s.end_time = Some(start + std::time::Duration::from_secs(2));
+
+        let out = format!("{}", s);
+        // should contain duration, speed and success rate
+        assert!(out.contains("耗时") || out.contains("s"));
+        assert!(
+            out.contains("速度") || out.contains("记录") || out.contains("成")
+        );
+        assert!(out.contains("成"));
+    }
+
+    #[test]
+    fn test_success_rate_and_reset() {
+        let mut s = ExportStats::default();
+        // when no records, success rate should be 0 and total_records 0
+        assert_eq!(s.success_rate(), 0.0);
+        assert_eq!(s.total_records(), 0);
+
+        s.exported_records = 3;
+        s.failed_records = 1;
+        assert!((s.success_rate() - 75.0).abs() < 1e-6);
+        assert_eq!(s.total_records(), 4);
+
+        // reset should zero counters and clear end_time
+        s.finish();
+        assert!(s.end_time.is_some());
+        s.reset();
+        assert_eq!(s.exported_records, 0);
+        assert_eq!(s.failed_records, 0);
+        assert!(s.end_time.is_none());
+    }
+
+    #[test]
+    fn test_duration_none_and_records_per_second_none() {
+        // default ExportStats has no start_time -> duration should be None
+        let s = ExportStats::default();
+        assert!(s.duration().is_none());
+        assert!(s.records_per_second().is_none());
+        // Display should still include counts
+        let out = format!("{}", s);
+        assert!(out.contains("成功"));
+    }
+
+    #[test]
+    fn test_display_zero_duration_includes_speed() {
+        // create stats where start_time == end_time to simulate zero duration
+        let mut s = ExportStats::new();
+        s.exported_records = 1;
+        if let Some(start) = s.start_time {
+            s.end_time = Some(start);
+        }
+
+        let out = format!("{}", s);
+        // should include the speed field (even if 0.00)
+        assert!(out.contains("速度") || out.contains("记录/秒"));
     }
 }

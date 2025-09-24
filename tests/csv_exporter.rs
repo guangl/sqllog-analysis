@@ -5,7 +5,6 @@ mod common;
 #[cfg(feature = "exporter-csv")]
 mod csv_tests {
     use sqllog_analysis::{
-        config::SqllogConfig,
         exporter::{CsvExporter, SyncExporter},
         sqllog::{SyncSqllogParser, types::Sqllog},
     };

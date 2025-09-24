@@ -21,4 +21,8 @@ pub use utils::{find_first_row_pos, is_first_row, line_bytes_to_str_impl};
     feature = "exporter-sqlite",
     feature = "exporter-duckdb"
 ))]
-pub use concurrent::{ExportTask, ProcessingSummary};
+pub use concurrent::{
+    ExportTask, ProcessingSummary, parse_and_export_concurrent,
+};
+
+pub use concurrent::parse_files_concurrent;

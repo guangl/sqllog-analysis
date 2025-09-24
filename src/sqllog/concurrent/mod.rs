@@ -26,3 +26,13 @@ pub use types::{ParseBatch, ParseTask};
     feature = "exporter-duckdb"
 ))]
 pub use types::{ExportTask, ProcessingSummary};
+
+#[cfg(any(
+    feature = "exporter-csv",
+    feature = "exporter-json",
+    feature = "exporter-sqlite",
+    feature = "exporter-duckdb"
+))]
+pub use parse_workers::parse_and_export_concurrent;
+
+pub use parse_workers::parse_files_concurrent;

@@ -189,3 +189,126 @@ impl SyncSqllogParser {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    // Helper to create a temp file with given content and return its path
+    fn write_temp_file(name: &str, content: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(name);
+        // ignore result for overwrite during tests
+        let _ = fs::write(&p, content);
+        p
+    }
+
+    #[test]
+    fn test_parse_with_hooks_file_not_found_returns_err() {
+        let missing =
+            std::env::temp_dir().join("this_file_should_not_exist_12345.log");
+        // ensure the file does not exist
+        let _ = fs::remove_file(&missing);
+
+        let res = SyncSqllogParser::parse_with_hooks(
+            missing,
+            1,
+            |_records, _errors| {},
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_parse_with_hooks_chunk_size_one_calls_hook_per_record() {
+        // a minimal valid segment matching the parser regex with EXECTIME line
+        let segment = "2025-09-21 12:00:00.000 (EP[1] sess:0x1 thrd:1 user:root trxid:1 stmt:0x1) [SEL]: select 1\nEXECTIME: 100(ms) ROWCOUNT: 1 EXEC_ID: 123.";
+        let path = write_temp_file("sqllog_test_chunk1.log", segment);
+
+        let hook_calls: Arc<Mutex<Vec<(usize, usize)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let hook_calls_clone = hook_calls.clone();
+
+        let res = SyncSqllogParser::parse_with_hooks(
+            &path,
+            1,
+            move |records, errors| {
+                let mut guard = hook_calls_clone.lock().unwrap();
+                guard.push((records.len(), errors.len()));
+            },
+        );
+
+        // cleanup
+        let _ = fs::remove_file(&path);
+
+        assert!(res.is_ok());
+        let guard = hook_calls.lock().unwrap();
+        // with chunk_size=1 and a single record, hook should be called once with 1 record
+        assert_eq!(guard.len(), 1);
+        assert_eq!(guard[0].0, 1);
+        assert_eq!(guard[0].1, 0);
+    }
+
+    #[test]
+    fn test_parse_with_hooks_mixed_valid_and_invalid_segments() {
+        // valid segment followed by an invalid segment that still starts with a timestamp
+        // so the parser treats it as a new segment but fails to parse its fields
+        let valid = "2025-09-21 12:00:00.000 (EP[1] sess:0x1 thrd:1 user:root trxid:1 stmt:0x1) [SEL]: select 1\nEXECTIME: 50(ms) ROWCOUNT: 1 EXEC_ID: 11.";
+        // starts with a timestamp but missing required parentheses/fields
+        let invalid =
+            "2025-09-21 12:00:01.000 malformed header without expected fields";
+        let content = format!("{}\n{}\n", valid, invalid);
+        let path = write_temp_file("sqllog_test_mixed.log", &content);
+
+        let stats: Arc<Mutex<(usize, usize)>> =
+            Arc::new(Mutex::new((0usize, 0usize)));
+        let stats_clone = stats.clone();
+
+        let res = SyncSqllogParser::parse_with_hooks(
+            &path,
+            2,
+            move |records, errors| {
+                let mut g = stats_clone.lock().unwrap();
+                g.0 += records.len();
+                g.1 += errors.len();
+            },
+        );
+
+        // cleanup
+        let _ = fs::remove_file(&path);
+
+        assert!(res.is_ok());
+        let g = stats.lock().unwrap();
+        // we expect one successful record and one error for the invalid segment
+        assert!(g.0 >= 1);
+        assert!(g.1 >= 1);
+    }
+
+    #[test]
+    fn test_parse_with_hooks_ignores_whitespace_only_content() {
+        let content = "\n\n  \n\r\n";
+        let path = write_temp_file("sqllog_test_ws.log", content);
+
+        let calls: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
+        let calls_clone = calls.clone();
+
+        let res = SyncSqllogParser::parse_with_hooks(
+            &path,
+            1,
+            move |_records, _errors| {
+                let mut g = calls_clone.lock().unwrap();
+                *g += 1;
+            },
+        );
+
+        // cleanup
+        let _ = fs::remove_file(&path);
+
+        assert!(res.is_ok());
+        let g = calls.lock().unwrap();
+        // no hook calls expected for whitespace-only file
+        assert_eq!(*g, 0);
+    }
+}

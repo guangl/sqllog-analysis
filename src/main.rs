@@ -336,3 +336,101 @@ fn run_export(
     println!("导出完成！");
     Ok(())
 }
+
+#[cfg(test)]
+#[cfg(any(feature = "exporter-csv", feature = "exporter-json"))]
+mod tests {
+    use super::*;
+    use sqllog_analysis::config::SqllogConfig;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn sample_log() -> &'static str {
+        r#"2025-09-16 20:02:53.562 (EP[0] sess:0x1 thrd:1 user:U trxid:1 stmt:0x1) [SEL]: SELECT 1
+2025-09-16 20:02:53.563 (EP[0] sess:0x2 thrd:2 user:U trxid:2 stmt:0x2) [SEL]: SELECT 2"#
+    }
+
+    #[cfg(feature = "exporter-csv")]
+    #[test]
+    fn test_run_export_csv_creates_file() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("test.log");
+        fs::write(&log_path, sample_log()).unwrap();
+
+        let output_base = tmp.path().join("out/export_base");
+        let output_base_str = output_base.to_str().unwrap();
+
+        let mut config = SqllogConfig::default();
+        config.batch_size = 10;
+
+        // Call run_export with CSV format
+        let res = run_export(
+            &[log_path.clone()],
+            output_base_str,
+            Some(ExportFormat::Csv),
+            config,
+        );
+        assert!(res.is_ok());
+
+        // csv file should exist
+        let csv_path = format!("{}.csv", output_base_str);
+        assert!(std::path::Path::new(&csv_path).exists());
+    }
+
+    #[cfg(feature = "exporter-json")]
+    #[test]
+    fn test_run_export_json_creates_file() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("test.log");
+        fs::write(&log_path, sample_log()).unwrap();
+
+        let output_base = tmp.path().join("out/export_base2");
+        let output_base_str = output_base.to_str().unwrap();
+
+        let mut config = SqllogConfig::default();
+        config.batch_size = 10;
+
+        // Call run_export with JSON format
+        let res = run_export(
+            &[log_path.clone()],
+            output_base_str,
+            Some(ExportFormat::Json),
+            config,
+        );
+        assert!(res.is_ok());
+
+        // json file should exist
+        let json_path = format!("{}.json", output_base_str);
+        assert!(std::path::Path::new(&json_path).exists());
+    }
+
+    #[test]
+    fn test_run_export_auto_prefers_available_exporter() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("test.log");
+        fs::write(&log_path, sample_log()).unwrap();
+
+        let output_base = tmp.path().join("out/export_base_auto");
+        let output_base_str = output_base.to_str().unwrap();
+
+        let mut config = SqllogConfig::default();
+        config.batch_size = 10;
+
+        // Auto should pick the first available exporter (CSV when enabled)
+        let res = run_export(
+            &[log_path.clone()],
+            output_base_str,
+            Some(ExportFormat::Auto),
+            config,
+        );
+        assert!(res.is_ok());
+
+        // Expect at least one of csv or json to exist depending on features; prefer csv
+        let csv_path = format!("{}.csv", output_base_str);
+        let json_path = format!("{}.json", output_base_str);
+        assert!(
+            std::path::Path::new(&csv_path).exists()
+                || std::path::Path::new(&json_path).exists()
+        );
+    }
+}

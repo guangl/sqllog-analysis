@@ -90,3 +90,168 @@ pub fn export_worker<E: SyncExporter + Send + 'static>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sqllog::types::Sqllog;
+    use std::path::PathBuf;
+    use std::sync::mpsc;
+
+    // exporter that always succeeds
+    struct SuccessExporter;
+    impl crate::exporter::sync_impl::SyncExporter for SuccessExporter {
+        fn name(&self) -> &str {
+            "SUCCESS"
+        }
+        fn export_record(
+            &mut self,
+            _record: &Sqllog,
+        ) -> crate::error::Result<()> {
+            Ok(())
+        }
+    }
+
+    // exporter that always fails
+    struct FailExporter;
+    impl crate::exporter::sync_impl::SyncExporter for FailExporter {
+        fn name(&self) -> &str {
+            "FAIL"
+        }
+        fn export_record(
+            &mut self,
+            _record: &Sqllog,
+        ) -> crate::error::Result<()> {
+            Err(crate::error::SqllogError::other("fail"))
+        }
+    }
+
+    #[test]
+    fn test_export_worker_success_sends_stats() {
+        let (task_tx, task_rx) = mpsc::channel();
+        let (res_tx, res_rx) = mpsc::channel();
+
+        // send one task
+        let task = ExportTask {
+            task_id: 1,
+            records: vec![Sqllog::default(), Sqllog::default()],
+            source_file: PathBuf::from("test"),
+        };
+        task_tx.send(task).unwrap();
+        // close sender so worker will exit after processing
+        drop(task_tx);
+
+        // run worker
+        let res = export_worker(0, SuccessExporter, task_rx, res_tx);
+        assert!(res.is_ok());
+
+        // we expect one stats sent
+        let stats = res_rx.recv().unwrap();
+        assert_eq!(stats.exported_records, 2);
+    }
+
+    #[test]
+    fn test_export_worker_failure_does_not_send_stats() {
+        let (task_tx, task_rx) = mpsc::channel();
+        let (res_tx, res_rx) = mpsc::channel();
+
+        let task = ExportTask {
+            task_id: 2,
+            records: vec![Sqllog::default()],
+            source_file: PathBuf::from("test"),
+        };
+        task_tx.send(task).unwrap();
+        drop(task_tx);
+
+        let res = export_worker(1, FailExporter, task_rx, res_tx);
+        assert!(res.is_ok());
+
+        // channel should be closed or have no messages
+        assert!(res_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_export_worker_send_error_logged_but_ok() {
+        let (task_tx, task_rx) = mpsc::channel();
+        let (res_tx, res_rx) = mpsc::channel();
+
+        // drop receiver so send will fail inside worker
+        drop(res_rx);
+
+        let task = ExportTask {
+            task_id: 3,
+            records: vec![Sqllog::default()],
+            source_file: PathBuf::from("test"),
+        };
+        task_tx.send(task).unwrap();
+        drop(task_tx);
+
+        let res = export_worker(2, SuccessExporter, task_rx, res_tx);
+        // worker should return Ok even if send failed
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_export_worker_processes_multiple_tasks_and_sends_stats() {
+        let (task_tx, task_rx) = mpsc::channel();
+        let (res_tx, res_rx) = mpsc::channel();
+
+        let task1 = ExportTask {
+            task_id: 4,
+            records: vec![Sqllog::default()],
+            source_file: PathBuf::from("t1"),
+        };
+        let task2 = ExportTask {
+            task_id: 5,
+            records: vec![
+                Sqllog::default(),
+                Sqllog::default(),
+                Sqllog::default(),
+            ],
+            source_file: PathBuf::from("t2"),
+        };
+        task_tx.send(task1).unwrap();
+        task_tx.send(task2).unwrap();
+        drop(task_tx);
+
+        let res = export_worker(3, SuccessExporter, task_rx, res_tx);
+        assert!(res.is_ok());
+
+        // should receive two stats
+        let s1 = res_rx.recv().unwrap();
+        let s2 = res_rx.recv().unwrap();
+        assert!(s1.exported_records == 1 || s2.exported_records == 1);
+        assert!(s1.exported_records + s2.exported_records == 4);
+    }
+
+    #[test]
+    fn test_export_worker_no_tasks_exits_ok() {
+        // no tasks sent, channel closed immediately
+        let (task_tx, task_rx) = mpsc::channel();
+        let (res_tx, _res_rx) = mpsc::channel();
+        drop(task_tx);
+
+        let res = export_worker(4, SuccessExporter, task_rx, res_tx);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_export_worker_empty_records_sends_zero() {
+        let (task_tx, task_rx) = mpsc::channel();
+        let (res_tx, res_rx) = mpsc::channel();
+
+        let task = ExportTask {
+            task_id: 6,
+            records: vec![],
+            source_file: PathBuf::from("empty"),
+        };
+        task_tx.send(task).unwrap();
+        drop(task_tx);
+
+        let res = export_worker(5, SuccessExporter, task_rx, res_tx);
+        assert!(res.is_ok());
+
+        let stats = res_rx.recv().unwrap();
+        assert_eq!(stats.exported_records, 0);
+    }
+}

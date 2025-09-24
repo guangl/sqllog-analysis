@@ -146,3 +146,165 @@ impl SyncExporter for SyncCsvExporter {
         self.stats.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_escape_csv_field_various() {
+        assert_eq!(SyncCsvExporter::escape_csv_field("simple"), "simple");
+        assert_eq!(
+            SyncCsvExporter::escape_csv_field("with,comma"),
+            "\"with,comma\""
+        );
+        assert_eq!(
+            SyncCsvExporter::escape_csv_field("quote\"here"),
+            "\"quote\"\"here\""
+        );
+        assert_eq!(
+            SyncCsvExporter::escape_csv_field("line\nbreak"),
+            "\"line\nbreak\""
+        );
+    }
+
+    #[test]
+    fn test_write_header_on_finalize_and_export() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncCsvExporter::new(path).unwrap();
+        // finalize when no records -> should write header
+        exporter.finalize().unwrap();
+
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        assert!(s.contains("occurrence_time,ep,session"));
+
+        // now test export_record writes header and a record
+        let tmp2 = NamedTempFile::new().unwrap();
+        let path2 = tmp2.path();
+        let mut exporter2 = SyncCsvExporter::new(path2).unwrap();
+
+        let record = Sqllog {
+            occurrence_time: "t".into(),
+            ep: "e".into(),
+            description: "d".into(),
+            ..Default::default()
+        };
+
+        exporter2.export_record(&record).unwrap();
+        exporter2.finalize().unwrap();
+
+        let mut s2 = String::new();
+        tmp2.reopen().unwrap().read_to_string(&mut s2).unwrap();
+        assert!(s2.contains("occurrence_time,ep,session"));
+        assert!(s2.contains("t"));
+    }
+
+    #[test]
+    fn test_insert_records_empty_and_format_optional_fields() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncCsvExporter::new(path).unwrap();
+
+        // insert empty slice -> no header written, file stays empty
+        exporter.insert_records(&[]).unwrap();
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        assert!(s.is_empty());
+
+        // now test format_record with optional numeric fields present
+        let exporter2 = SyncCsvExporter::new(path).unwrap();
+        let record = Sqllog {
+            occurrence_time: "t".into(),
+            ep: "e".into(),
+            execute_time: Some(123),
+            rowcount: Some(5),
+            execute_id: Some(7),
+            ..Default::default()
+        };
+
+        let line = exporter2.format_record(&record);
+        assert!(line.contains("123"));
+        assert!(line.contains("5"));
+        assert!(line.contains("7"));
+    }
+
+    #[test]
+    fn test_export_batch_writes_multiple_records() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncCsvExporter::new(path).unwrap();
+
+        let r1 = Sqllog {
+            occurrence_time: "a".into(),
+            ep: "e".into(),
+            ..Default::default()
+        };
+        let r2 = Sqllog {
+            occurrence_time: "b".into(),
+            ep: "e".into(),
+            ..Default::default()
+        };
+
+        exporter.export_batch(&[r1, r2]).unwrap();
+        exporter.finalize().unwrap();
+
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        // header should be present and two records should be written
+        assert!(s.contains("occurrence_time,ep,session"));
+        assert!(s.contains("a"));
+        assert!(s.contains("b"));
+    }
+
+    #[test]
+    fn test_export_record_writes_header_once() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncCsvExporter::new(path).unwrap();
+
+        let r1 = Sqllog {
+            occurrence_time: "p".into(),
+            ep: "e".into(),
+            ..Default::default()
+        };
+        let r2 = Sqllog {
+            occurrence_time: "q".into(),
+            ep: "e".into(),
+            ..Default::default()
+        };
+
+        exporter.export_record(&r1).unwrap();
+        exporter.export_record(&r2).unwrap();
+        exporter.finalize().unwrap();
+
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        // header should only appear once
+        let header_count = s.matches("occurrence_time,ep,session").count();
+        assert_eq!(header_count, 1);
+        assert!(s.contains("p"));
+        assert!(s.contains("q"));
+    }
+
+    #[test]
+    fn test_finalize_writes_header_when_never_written() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+
+        let mut exporter = SyncCsvExporter::new(path).unwrap();
+        // never exported any record, header_written should be false
+        exporter.finalize().unwrap();
+
+        let mut s = String::new();
+        tmp.reopen().unwrap().read_to_string(&mut s).unwrap();
+        assert!(s.contains("occurrence_time,ep,session"));
+    }
+}
