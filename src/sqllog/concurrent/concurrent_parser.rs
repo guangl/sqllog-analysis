@@ -56,8 +56,8 @@ impl ConcurrentParser {
         )
     }
 
-    /// 流式解析多个文件（不导出）
-    pub fn parse_files_streaming(
+    /// 并发解析多个文件（不导出）
+    pub fn parse_files_concurrent(
         &self,
         file_paths: &[PathBuf],
     ) -> Result<(

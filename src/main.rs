@@ -126,7 +126,7 @@ fn run_parse_only(files: &[PathBuf], config: SqllogConfig) -> Result<()> {
     let parser = ConcurrentParser::new(config);
 
     let start = std::time::Instant::now();
-    let (records, errors) = parser.parse_files_streaming(files)?;
+    let (records, errors) = parser.parse_files_concurrent(files)?;
     let elapsed = start.elapsed();
 
     println!("\n=== 解析结果 ===");
