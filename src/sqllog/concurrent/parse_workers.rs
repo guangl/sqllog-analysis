@@ -1,10 +1,10 @@
-//! 解析工作线程相关功能
+//! 并发解析和流水线导出功能
 
 use crate::error::Result;
+use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::{Arc, mpsc};
-
-use super::types::{ParseBatch, ParseTask};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 #[cfg(any(
     feature = "exporter-csv",
@@ -12,319 +12,514 @@ use super::types::{ParseBatch, ParseTask};
     feature = "exporter-sqlite",
     feature = "exporter-duckdb"
 ))]
-use super::types::ExportTask;
+use std::sync::mpsc;
 
-/// 通用解析文件函数，减少重复代码
-pub fn parse_file_to_batch(
-    thread_id: usize,
-    file_path: &PathBuf,
+#[cfg(any(
+    feature = "exporter-csv",
+    feature = "exporter-json",
+    feature = "exporter-sqlite",
+    feature = "exporter-duckdb"
+))]
+use crate::exporter::sync_impl::SyncExporter;
+
+#[cfg(any(
+    feature = "exporter-csv",
+    feature = "exporter-json",
+    feature = "exporter-sqlite",
+    feature = "exporter-duckdb"
+))]
+/// 批次数据类型
+type BatchData = Vec<crate::sqllog::types::Sqllog>;
+
+#[cfg(any(
+    feature = "exporter-csv",
+    feature = "exporter-json",
+    feature = "exporter-sqlite",
+    feature = "exporter-duckdb"
+))]
+/// 导出任务消息
+enum ExportMessage {
+    /// 批次数据
+    Batch(BatchData),
+    /// 结束信号
+    Finish,
+}
+
+#[cfg(any(
+    feature = "exporter-csv",
+    feature = "exporter-json",
+    feature = "exporter-sqlite",
+    feature = "exporter-duckdb"
+))]
+/// 并发解析并流水线导出多个文件
+///
+/// 架构设计：
+/// 1. 按文件数创建解析线程（每个文件一个线程，最大 thread_count 个线程）
+/// 2. 单独的导出线程接收所有解析线程的批次数据
+/// 3. 解析线程完成后导出线程才结束
+pub fn parse_and_export_concurrent<E: SyncExporter + Send + 'static>(
+    file_paths: &[PathBuf],
+    mut exporter: E,
     batch_size: usize,
-    task_description: &str,
-) -> Result<ParseBatch> {
+    thread_count: usize,
+) -> Result<Vec<(usize, usize)>> {
     #[cfg(feature = "logging")]
-    let task_start_time = std::time::Instant::now();
+    let start_time = std::time::Instant::now();
 
-    let mut all_records = Vec::new();
-    let mut all_errors = Vec::new();
-    let mut batch_counter = 0;
-
-    let parse_result = crate::sqllog::SyncSqllogParser::parse_with_hooks(
-        file_path,
-        batch_size,
-        |batch_records, batch_errors| {
-            all_records.extend_from_slice(batch_records);
-            all_errors.extend_from_slice(batch_errors);
-            batch_counter += 1;
-
-            #[cfg(feature = "logging")]
-            tracing::trace!(
-                "线程 {} {} 批次 {}: {} 条记录, {} 个错误",
-                thread_id,
-                task_description,
-                batch_counter,
-                batch_records.len(),
-                batch_errors.len()
-            );
-        },
+    #[cfg(feature = "logging")]
+    tracing::info!(
+        "开始并发解析和流水线导出 {} 个文件，线程数配置: {}",
+        file_paths.len(),
+        if thread_count == 0 {
+            "每文件一线程".to_string()
+        } else {
+            thread_count.to_string()
+        }
     );
 
-    match parse_result {
-        Ok(_) => {
+    if file_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 创建导出消息队列
+    let (export_tx, export_rx) = mpsc::channel::<ExportMessage>();
+
+    // 启动导出线程
+    let export_handle = thread::spawn(move || -> Result<()> {
+        #[cfg(feature = "logging")]
+        tracing::info!("导出线程启动");
+
+        let mut batch_count = 0;
+        let mut total_exported = 0;
+
+        while let Ok(message) = export_rx.recv() {
+            match message {
+                ExportMessage::Batch(batch) => {
+                    if !batch.is_empty() {
+                        batch_count += 1;
+                        total_exported += batch.len();
+
+                        #[cfg(feature = "logging")]
+                        tracing::debug!(
+                            "导出线程处理第 {} 批: {} 条记录，累计: {} 条",
+                            batch_count,
+                            batch.len(),
+                            total_exported
+                        );
+
+                        if let Err(e) = exporter.export_batch(&batch) {
+                            #[cfg(feature = "logging")]
+                            tracing::error!("导出批次失败: {}", e);
+                            return Err(e.into());
+                        }
+
+                        #[cfg(feature = "logging")]
+                        tracing::debug!(
+                            "导出线程成功处理第 {} 批",
+                            batch_count
+                        );
+                    }
+                }
+                ExportMessage::Finish => {
+                    #[cfg(feature = "logging")]
+                    tracing::info!(
+                        "导出线程收到结束信号，总共处理 {} 批，{} 条记录",
+                        batch_count,
+                        total_exported
+                    );
+                    break;
+                }
+            }
+        }
+
+        // 完成导出
+        #[cfg(feature = "logging")]
+        tracing::debug!("导出线程开始最终化");
+
+        if let Err(e) = exporter.finalize() {
             #[cfg(feature = "logging")]
-            {
-                let task_elapsed = task_start_time.elapsed();
-                tracing::info!(
-                    "线程 {} 成功{}: {}，总记录: {}, 总错误: {}, 批次: {}, 耗时: {:?}",
-                    thread_id,
-                    task_description,
-                    file_path.display(),
-                    all_records.len(),
-                    all_errors.len(),
-                    batch_counter,
-                    task_elapsed
-                );
+            tracing::error!("完成导出时出错: {}", e);
+            return Err(e.into());
+        }
+
+        #[cfg(feature = "logging")]
+        tracing::info!("导出线程完成，总共导出 {} 条记录", total_exported);
+        Ok(())
+    });
+
+    // 创建文件队列和结果收集
+    let file_paths_owned: Vec<(usize, PathBuf)> =
+        file_paths.iter().enumerate().map(|(i, p)| (i, p.clone())).collect();
+    let file_queue =
+        Arc::new(Mutex::new(VecDeque::from_iter(file_paths_owned)));
+    let results =
+        Arc::new(Mutex::new(vec![(0usize, 0usize); file_paths.len()]));
+
+    // 计算实际使用的线程数
+    let actual_threads = if thread_count == 0 {
+        file_paths.len()
+    } else {
+        thread_count.min(file_paths.len())
+    };
+
+    #[cfg(feature = "logging")]
+    tracing::info!("启动 {} 个解析线程", actual_threads);
+
+    // 创建解析线程
+    let mut parse_handles = Vec::new();
+    for thread_id in 0..actual_threads {
+        let file_queue = Arc::clone(&file_queue);
+        let results = Arc::clone(&results);
+        let export_tx = export_tx.clone();
+
+        let handle = thread::spawn(move || {
+            #[cfg(feature = "logging")]
+            tracing::info!("解析线程 {} 启动", thread_id);
+
+            loop {
+                // 获取下一个文件
+                let file_info = {
+                    let mut queue = file_queue.lock().unwrap();
+                    queue.pop_front()
+                };
+
+                if let Some((file_index, file_path)) = file_info {
+                    let file_path_for_log = file_path.clone();
+
+                    #[cfg(feature = "logging")]
+                    tracing::info!(
+                        "线程 {} 开始处理文件: {}",
+                        thread_id,
+                        file_path_for_log.display()
+                    );
+
+                    let mut total_records = 0;
+                    let mut total_errors = 0;
+
+                    // 解析文件并发送批次到导出线程
+                    #[cfg(feature = "logging")]
+                    tracing::debug!(
+                        "线程 {} 开始解析，批次大小: {}",
+                        thread_id,
+                        batch_size
+                    );
+
+                    let parse_result =
+                        crate::sqllog::SyncSqllogParser::parse_with_hooks(
+                            &file_path,
+                            batch_size,
+                            |batch_records, batch_errors| {
+                                total_records += batch_records.len();
+                                total_errors += batch_errors.len();
+
+                                #[cfg(feature = "logging")]
+                                tracing::debug!(
+                                    "线程 {} 处理批次: {} 记录, {} 错误",
+                                    thread_id,
+                                    batch_records.len(),
+                                    batch_errors.len()
+                                );
+
+                                // 发送批次数据到导出线程
+                                if !batch_records.is_empty() {
+                                    #[cfg(feature = "logging")]
+                                    tracing::debug!(
+                                        "线程 {} 发送批次到导出线程: {} 条记录",
+                                        thread_id,
+                                        batch_records.len()
+                                    );
+
+                                    if let Err(e) =
+                                        export_tx.send(ExportMessage::Batch(
+                                            batch_records.to_vec(),
+                                        ))
+                                    {
+                                        #[cfg(feature = "logging")]
+                                        tracing::error!(
+                                            "线程 {} 发送批次数据到导出线程失败: {}",
+                                            thread_id,
+                                            e
+                                        );
+                                    }
+                                } else {
+                                    #[cfg(feature = "logging")]
+                                    tracing::debug!(
+                                        "线程 {} 跳过空批次",
+                                        thread_id
+                                    );
+                                }
+                            },
+                        );
+
+                    // 记录结果
+                    match parse_result {
+                        Ok(_) => {
+                            let mut results_lock = results.lock().unwrap();
+                            results_lock[file_index] =
+                                (total_records, total_errors);
+
+                            #[cfg(feature = "logging")]
+                            tracing::info!(
+                                "线程 {} 完成文件 {}: {} 条记录, {} 个错误",
+                                thread_id,
+                                file_path_for_log.display(),
+                                total_records,
+                                total_errors
+                            );
+                        }
+                        Err(e) => {
+                            #[cfg(feature = "logging")]
+                            tracing::error!(
+                                "线程 {} 处理文件 {} 失败: {}",
+                                thread_id,
+                                file_path_for_log.display(),
+                                e
+                            );
+                            // 记录错误结果
+                            let mut results_lock = results.lock().unwrap();
+                            results_lock[file_index] =
+                                (total_records, total_errors);
+                        }
+                    }
+                } else {
+                    // 没有更多文件，退出循环
+                    break;
+                }
             }
 
-            Ok(ParseBatch {
-                records: all_records,
-                errors: all_errors,
-                source_file: file_path.clone(),
-                batch_id: batch_counter,
-            })
+            #[cfg(feature = "logging")]
+            tracing::info!("解析线程 {} 完成", thread_id);
+        });
+
+        parse_handles.push(handle);
+    }
+
+    // 等待所有解析线程完成
+    #[cfg(feature = "logging")]
+    tracing::debug!("开始等待解析线程完成");
+
+    for (i, handle) in parse_handles.into_iter().enumerate() {
+        #[cfg(feature = "logging")]
+        tracing::debug!("等待解析线程 {} 完成", i);
+
+        if let Err(e) = handle.join() {
+            #[cfg(feature = "logging")]
+            tracing::error!("解析线程 {} 异常退出: {:?}", i, e);
+        } else {
+            #[cfg(feature = "logging")]
+            tracing::debug!("解析线程 {} 正常完成", i);
+        }
+    }
+
+    #[cfg(feature = "logging")]
+    tracing::debug!("所有解析线程已完成");
+
+    // 发送完成信号给导出线程
+    #[cfg(feature = "logging")]
+    tracing::debug!("发送完成信号到导出线程");
+
+    if let Err(e) = export_tx.send(ExportMessage::Finish) {
+        #[cfg(feature = "logging")]
+        tracing::error!("发送完成信号失败: {}", e);
+    }
+
+    drop(export_tx); // 关闭发送端
+
+    #[cfg(feature = "logging")]
+    tracing::debug!("开始等待导出线程完成");
+
+    // 等待导出线程完成
+    match export_handle.join() {
+        Ok(result) => {
+            if let Err(e) = result {
+                #[cfg(feature = "logging")]
+                tracing::error!("导出线程返回错误: {}", e);
+                return Err(e);
+            }
+            #[cfg(feature = "logging")]
+            tracing::debug!("导出线程正常完成");
         }
         Err(e) => {
             #[cfg(feature = "logging")]
-            tracing::error!(
-                "线程 {} {}失败: {}, 错误: {}",
-                thread_id,
-                task_description,
-                file_path.display(),
-                e
-            );
-            Err(e)
+            tracing::error!("导出线程异常退出: {:?}", e);
+            return Err(crate::error::SqllogError::parse_error(
+                "导出线程异常退出",
+            )
+            .into());
         }
     }
-}
 
-/// 解析单个文件的工作线程
-pub fn simple_parse_single_file(
-    thread_id: usize,
-    file_path: PathBuf,
-    result_tx: mpsc::Sender<ParseBatch>,
-    batch_size: usize,
-) -> Result<()> {
-    let batch =
-        parse_file_to_batch(thread_id, &file_path, batch_size, "处理单文件")?;
+    // 提取结果
+    let final_results = Arc::try_unwrap(results).unwrap().into_inner().unwrap();
 
-    if let Err(e) = result_tx.send(batch) {
-        #[cfg(feature = "logging")]
-        tracing::error!("线程 {} 发送结果失败: {}", thread_id, e);
+    #[cfg(feature = "logging")]
+    {
+        let elapsed = start_time.elapsed();
+        let total_records: usize = final_results.iter().map(|(r, _)| r).sum();
+        let total_errors: usize = final_results.iter().map(|(_, e)| e).sum();
+        tracing::info!(
+            "并发解析和流水线导出完成: {} 个文件，总记录: {}, 总错误: {}, 耗时: {:?}",
+            file_paths.len(),
+            total_records,
+            total_errors,
+            elapsed
+        );
     }
 
-    Ok(())
+    Ok(final_results)
 }
 
-/// 使用共享接收器的简化解析工作线程
-pub fn simple_parse_worker_with_shared_rx(
-    thread_id: usize,
-    task_rx: Arc<std::sync::Mutex<mpsc::Receiver<ParseTask>>>,
-    result_tx: mpsc::Sender<ParseBatch>,
+/// 仅并发解析多个文件（不导出）
+pub fn parse_files_concurrent(
+    file_paths: &[PathBuf],
     batch_size: usize,
-) -> Result<()> {
+    thread_count: usize,
+) -> Result<(
+    Vec<crate::sqllog::types::Sqllog>,
+    Vec<crate::sqllog::sync_parser::ParseError>,
+)> {
     #[cfg(feature = "logging")]
-    tracing::debug!("共享解析工作线程 {} 启动", thread_id);
+    let start_time = std::time::Instant::now();
 
-    let mut processed_tasks = 0;
-
-    loop {
-        let task = {
-            let rx = task_rx.lock().unwrap();
-            match rx.recv() {
-                Ok(task) => {
-                    #[cfg(feature = "logging")]
-                    tracing::trace!(
-                        "线程 {} 接收到共享任务: {}",
-                        thread_id,
-                        task.file_path.display()
-                    );
-                    task
-                }
-                Err(_) => {
-                    #[cfg(feature = "logging")]
-                    tracing::trace!(
-                        "线程 {} 共享任务通道关闭，准备退出",
-                        thread_id
-                    );
-                    break; // 通道关闭，退出循环
-                }
-            }
-        };
-
-        // 使用统一的解析函数
-        match parse_file_to_batch(
-            thread_id,
-            &task.file_path,
-            batch_size,
-            "处理共享任务",
-        ) {
-            Ok(batch) => {
-                if let Err(e) = result_tx.send(batch) {
-                    #[cfg(feature = "logging")]
-                    tracing::error!("线程 {} 发送结果失败: {}", thread_id, e);
-                }
-            }
-            Err(e) => {
-                #[cfg(feature = "logging")]
-                tracing::error!("线程 {} 解析共享任务失败: {}", thread_id, e);
-            }
+    #[cfg(feature = "logging")]
+    tracing::info!(
+        "开始并发解析 {} 个文件，线程数配置: {}",
+        file_paths.len(),
+        if thread_count == 0 {
+            "每文件一线程".to_string()
+        } else {
+            thread_count.to_string()
         }
-
-        processed_tasks += 1;
-    }
-
-    #[cfg(feature = "logging")]
-    tracing::debug!(
-        "共享解析工作线程 {} 退出，处理了 {} 个任务",
-        thread_id,
-        processed_tasks
     );
 
-    Ok(())
-}
+    if file_paths.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
 
-/// 解析工作线程（用于解析+导出流水线）
-#[cfg(any(
-    feature = "exporter-csv",
-    feature = "exporter-json",
-    feature = "exporter-sqlite",
-    feature = "exporter-duckdb"
-))]
-pub fn parse_worker(
-    thread_id: usize,
-    task_rx: Arc<std::sync::Mutex<mpsc::Receiver<ParseTask>>>,
-    export_task_txs: Vec<mpsc::Sender<ExportTask>>,
-    batch_size: usize,
-) -> Result<()> {
+    // 创建文件队列和结果收集
+    let file_paths_owned: Vec<(usize, PathBuf)> =
+        file_paths.iter().enumerate().map(|(i, p)| (i, p.clone())).collect();
+    let file_queue =
+        Arc::new(Mutex::new(VecDeque::from_iter(file_paths_owned)));
+    let all_records = Arc::new(Mutex::new(Vec::new()));
+    let all_errors = Arc::new(Mutex::new(Vec::new()));
+
+    // 计算实际使用的线程数
+    let actual_threads = if thread_count == 0 {
+        file_paths.len()
+    } else {
+        thread_count.min(file_paths.len())
+    };
+
     #[cfg(feature = "logging")]
-    tracing::debug!("解析工作线程 {} 启动", thread_id);
+    tracing::info!("启动 {} 个解析线程", actual_threads);
 
-    let mut processed_files = 0;
-    let mut total_records = 0;
-    let mut total_errors = 0;
+    // 创建解析线程
+    let mut handles = Vec::new();
+    for thread_id in 0..actual_threads {
+        let file_queue = Arc::clone(&file_queue);
+        let all_records = Arc::clone(&all_records);
+        let all_errors = Arc::clone(&all_errors);
 
-    loop {
-        let task = {
-            let rx = task_rx.lock().unwrap();
-            match rx.recv() {
-                Ok(task) => {
+        let handle = thread::spawn(move || {
+            #[cfg(feature = "logging")]
+            tracing::info!("解析线程 {} 启动", thread_id);
+
+            loop {
+                // 获取下一个文件
+                let file_info = {
+                    let mut queue = file_queue.lock().unwrap();
+                    queue.pop_front()
+                };
+
+                if let Some((_file_index, file_path)) = file_info {
+                    let file_path_for_log = file_path.clone();
+
                     #[cfg(feature = "logging")]
-                    tracing::trace!(
-                        "线程 {} 接收到任务: {}",
+                    tracing::info!(
+                        "线程 {} 开始处理文件: {}",
                         thread_id,
-                        task.file_path.display()
+                        file_path_for_log.display()
                     );
-                    task
-                }
-                Err(_) => {
-                    #[cfg(feature = "logging")]
-                    tracing::trace!(
-                        "线程 {} 任务通道关闭，准备退出",
-                        thread_id
-                    );
-                    break; // 通道关闭，退出循环
-                }
-            }
-        };
 
-        #[cfg(feature = "logging")]
-        tracing::debug!(
-            "线程 {} 开始解析文件: {}",
-            thread_id,
-            task.file_path.display()
-        );
+                    let mut file_records = Vec::new();
+                    let mut file_errors = Vec::new();
 
-        // 记录解析任务开始时间
-        #[cfg(feature = "logging")]
-        let parse_task_start_time = std::time::Instant::now();
-
-        let mut file_errors = Vec::new();
-        let mut export_task_id = 0;
-
-        // 流式解析文件，分批发送到导出线程
-        let parse_result = crate::sqllog::SyncSqllogParser::parse_with_hooks(
-            &task.file_path,
-            batch_size,
-            |batch_records, batch_errors| {
-                // 收集解析错误
-                file_errors.extend_from_slice(batch_errors);
-
-                #[cfg(feature = "logging")]
-                tracing::trace!(
-                    "线程 {} 批次 {}: {} 条记录, {} 个错误",
-                    thread_id,
-                    export_task_id,
-                    batch_records.len(),
-                    batch_errors.len()
-                );
-
-                // 如果有记录，发送到所有导出线程
-                if !batch_records.is_empty() {
-                    total_records += batch_records.len();
-                    let export_task = ExportTask {
-                        records: batch_records.to_vec(),
-                        task_id: export_task_id,
-                        source_file: task.file_path.clone(),
-                    };
-
-                    // 将任务发送给所有导出器
-                    for (exporter_id, tx) in export_task_txs.iter().enumerate()
-                    {
-                        #[cfg(feature = "logging")]
-                        tracing::trace!(
-                            "线程 {} 向导出器 {} 发送批次 {}",
-                            thread_id,
-                            exporter_id,
-                            export_task_id
+                    // 解析文件
+                    let parse_result =
+                        crate::sqllog::SyncSqllogParser::parse_with_hooks(
+                            &file_path,
+                            batch_size,
+                            |batch_records, batch_errors| {
+                                file_records.extend_from_slice(batch_records);
+                                file_errors.extend_from_slice(batch_errors);
+                            },
                         );
 
-                        if let Err(e) = tx.send(export_task.clone()) {
+                    // 合并结果
+                    match parse_result {
+                        Ok(_) => {
+                            {
+                                let mut records = all_records.lock().unwrap();
+                                records.extend(file_records);
+                            }
+                            {
+                                let mut errors = all_errors.lock().unwrap();
+                                errors.extend(file_errors);
+                            }
+
+                            #[cfg(feature = "logging")]
+                            tracing::info!(
+                                "线程 {} 完成文件: {}",
+                                thread_id,
+                                file_path_for_log.display()
+                            );
+                        }
+                        Err(e) => {
                             #[cfg(feature = "logging")]
                             tracing::error!(
-                                "线程 {} 向导出器 {} 发送任务失败: {}",
+                                "线程 {} 处理文件 {} 失败: {}",
                                 thread_id,
-                                exporter_id,
+                                file_path_for_log.display(),
                                 e
                             );
                         }
                     }
-                    export_task_id += 1;
+                } else {
+                    // 没有更多文件，退出循环
+                    break;
                 }
-            },
-        );
-
-        match parse_result {
-            Ok(_) => {
-                #[cfg(feature = "logging")]
-                {
-                    let parse_task_elapsed = parse_task_start_time.elapsed();
-                    tracing::info!(
-                        "线程 {} 成功解析文件: {}，总记录: {}, 总错误: {}, 解析任务耗时: {:?}",
-                        thread_id,
-                        task.file_path.display(),
-                        total_records,
-                        file_errors.len(),
-                        parse_task_elapsed
-                    );
-                }
-
-                total_errors += file_errors.len();
-                processed_files += 1;
             }
-            Err(e) => {
-                #[cfg(feature = "logging")]
-                {
-                    let parse_task_elapsed = parse_task_start_time.elapsed();
-                    tracing::error!(
-                        "线程 {} 解析文件失败: {}, 错误: {}, 解析任务耗时: {:?}",
-                        thread_id,
-                        task.file_path.display(),
-                        e,
-                        parse_task_elapsed
-                    );
-                }
-                total_errors += 1;
-            }
-        }
+
+            #[cfg(feature = "logging")]
+            tracing::info!("解析线程 {} 完成", thread_id);
+        });
+
+        handles.push(handle);
     }
 
-    #[cfg(feature = "logging")]
-    tracing::info!(
-        "解析工作线程 {} 退出，处理了 {} 个文件，总记录: {}, 总错误: {}",
-        thread_id,
-        processed_files,
-        total_records,
-        total_errors
-    );
+    // 等待所有线程完成
+    for handle in handles {
+        let _ = handle.join();
+    }
 
-    Ok(())
+    // 提取结果
+    let final_records =
+        Arc::try_unwrap(all_records).unwrap().into_inner().unwrap();
+    let final_errors =
+        Arc::try_unwrap(all_errors).unwrap().into_inner().unwrap();
+
+    #[cfg(feature = "logging")]
+    {
+        let elapsed = start_time.elapsed();
+        tracing::info!(
+            "并发解析完成: {} 个文件，总记录: {}, 总错误: {}, 耗时: {:?}",
+            file_paths.len(),
+            final_records.len(),
+            final_errors.len(),
+            elapsed
+        );
+    }
+
+    Ok((final_records, final_errors))
 }
